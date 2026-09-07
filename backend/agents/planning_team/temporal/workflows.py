@@ -90,17 +90,24 @@ class PlanningWorkflow(HitlAnswerSignalMixin):
           unconsumed: no phase below arms a pause or reads
           ``self._submitted_answers`` yet — durably waiting on a pause and
           resuming with the delivered answers is separate, follow-on work.
-        - Adding this signal registration needed no ``workflow.patched`` gate,
-          despite this class already carrying ``_PER_PHASE_PATCH`` for
-          pre-migration histories: the handler only mutates in-memory mixin
-          state (``_active_resume_token``/``_submitted_answers``/
-          ``_buffered_signals``) that ``run()`` never reads, so replaying any
-          open history — with or without a ``submit_answers`` event in it —
-          produces identical activity-scheduling decisions either way.
-          Revisit this once follow-on work makes that state observable to
-          ``run()`` (e.g. a ``wait_condition`` reading it): at that point a
-          patch gate may become necessary for histories recorded before this
-          registration existed.
+        - The mixin now also carries the wait half
+          (``HitlAnswerSignalMixin.wait_for_answers``), but ``run()`` below
+          still never awaits it, so the registration stays dormant end to end:
+          arming a pause and resuming with the delivered answers is separate,
+          follow-on work.
+        - Neither the signal registration nor the inherited wait method needed
+          a ``workflow.patched`` gate, despite this class already carrying
+          ``_PER_PHASE_PATCH`` for pre-migration histories: the handler only
+          mutates in-memory mixin state (``_active_resume_token``/
+          ``_submitted_answers``/``_buffered_signals``) that ``run()`` never
+          reads, and a method nothing awaits schedules no commands, so
+          replaying any open history — with or without a ``submit_answers``
+          event in it — produces identical activity-scheduling decisions
+          either way.
+          A patch gate becomes REQUIRED the moment ``run()`` first awaits
+          ``wait_for_answers``: that is when a history recorded before the
+          pause existed would start replaying against a different command
+          sequence. Add the gate in that change, not before.
     """
 
     @workflow.run

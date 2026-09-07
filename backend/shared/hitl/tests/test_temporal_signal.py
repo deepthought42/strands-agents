@@ -456,3 +456,272 @@ def test_log_signal_diagnostic_is_a_silent_no_op_outside_a_workflow(monkeypatch,
 
     assert fake_logger.warnings == []
     assert not caplog.records
+
+
+# --------------------------------------------------------------------------
+# wait_for_answers -- the durable wait
+# --------------------------------------------------------------------------
+
+
+class _FakeWaitCondition:
+    """Stand-in for ``workflow.wait_condition``, driving the wait without a server.
+
+    Records, per await, whether the predicate ALREADY held at call time (the real
+    SDK returns immediately in that case, which is how a signal that beat the wait
+    gets consumed) and exactly what kwargs it was handed (so a test can pin that no
+    ``timeout=`` is ever passed). When the predicate does not hold, it runs the next
+    queued deliverer to simulate a signal landing while the workflow is parked, and
+    fails loudly if there is nothing left to deliver -- which in production would be
+    a wait that hangs forever.
+    """
+
+    def __init__(self, *deliverers) -> None:
+        self._deliverers = list(deliverers)
+        self.predicates: list = []
+        self.satisfied_at_call: list[bool] = []
+        self.kwargs: list[dict] = []
+
+    async def __call__(self, predicate, **kwargs) -> None:
+        # Evaluated ONCE per call, like the real wait_condition: a fake that
+        # polled the predicate twice would silently tolerate a side-effecting
+        # predicate the SDK would not.
+        satisfied = bool(predicate())
+        self.predicates.append(predicate)
+        self.satisfied_at_call.append(satisfied)
+        self.kwargs.append(kwargs)
+        if satisfied:
+            return
+        assert self._deliverers, "wait_condition parked with nothing left to deliver -- this wait would hang"
+        self._deliverers.pop(0)()
+        assert predicate(), "the scripted deliverer did not satisfy the wait predicate"
+
+
+class _Verifier:
+    """Stand-in for the caller's durable-store reconciliation, scripted per call."""
+
+    def __init__(self, *results: bool) -> None:
+        self._results = list(results)
+        self.calls = 0
+
+    async def __call__(self) -> bool:
+        self.calls += 1
+        assert self._results, "verify was awaited more times than the test scripted"
+        return self._results.pop(0)
+
+
+def _install_wait(monkeypatch, fake: _FakeWaitCondition) -> _FakeWaitCondition:
+    monkeypatch.setattr(temporal_signal_module.workflow, "wait_condition", fake)
+    return fake
+
+
+@pytest.mark.asyncio
+async def test_wait_for_answers_returns_the_delivered_batch_and_resets_state(monkeypatch) -> None:
+    """The core round trip: park, a token-matching signal lands, the batch is
+    returned and both pause attributes are reset so the next round starts clean."""
+    wf = _Workflow()
+    batch = [_answer("q1", selected_option_id="yes")]
+    fake = _install_wait(
+        monkeypatch,
+        _FakeWaitCondition(lambda: wf.submit_answers({"resume_token": "tok-1", "answers": batch})),
+    )
+
+    result = await wf.wait_for_answers("tok-1")
+
+    assert result == batch
+    assert fake.satisfied_at_call == [False]
+    assert wf._active_resume_token is None
+    assert wf._submitted_answers is None
+    assert wf._buffered_signals == {}
+
+
+@pytest.mark.asyncio
+async def test_wait_for_answers_arms_the_token_before_parking(monkeypatch) -> None:
+    """The token must be armed BEFORE the wait suspends, or a signal that lands
+    while parked would hit the no-active-pause branch and be buffered instead of
+    applied -- leaving the workflow paused on an answer it already received."""
+    wf = _Workflow()
+    observed: list = []
+
+    def _deliver() -> None:
+        observed.append(wf._active_resume_token)
+        wf.submit_answers({"resume_token": "tok-1", "answers": [_answer("q1")]})
+
+    _install_wait(monkeypatch, _FakeWaitCondition(_deliver))
+
+    await wf.wait_for_answers("tok-1")
+
+    assert observed == ["tok-1"]
+
+
+@pytest.mark.asyncio
+async def test_wait_for_answers_consumes_a_signal_that_arrived_before_the_wait(monkeypatch) -> None:
+    """The signal-before-wait race: a batch buffered while no pause was active is
+    applied when the wait arms, so the predicate already holds at call time and the
+    wait returns without ever parking. The flag is CHECKED, not only awaited."""
+    wf = _Workflow()
+    batch = [_answer("q1", selected_option_id="yes")]
+    wf.submit_answers({"resume_token": "tok-1", "answers": batch})
+    assert wf._buffered_signals == {"tok-1": batch}
+    fake = _install_wait(monkeypatch, _FakeWaitCondition())
+
+    result = await wf.wait_for_answers("tok-1")
+
+    assert result == batch
+    assert fake.satisfied_at_call == [True]
+    assert wf._buffered_signals == {}
+
+
+@pytest.mark.asyncio
+async def test_wait_for_answers_discards_buffered_entries_for_other_tokens(monkeypatch) -> None:
+    """Arming a pause clears the WHOLE buffer, not just the matching entry, so a
+    stale batch for a token this workflow never arms cannot survive into a later
+    round and be mistaken for that round's answer."""
+    wf = _Workflow()
+    wf.submit_answers({"resume_token": "stale", "answers": [_answer("q0")]})
+    batch = [_answer("q1")]
+    wf.submit_answers({"resume_token": "tok-1", "answers": batch})
+    assert set(wf._buffered_signals) == {"stale", "tok-1"}
+    _install_wait(monkeypatch, _FakeWaitCondition())
+
+    result = await wf.wait_for_answers("tok-1")
+
+    assert result == batch
+    assert wf._buffered_signals == {}
+
+
+@pytest.mark.asyncio
+async def test_wait_for_answers_predicate_tests_is_not_none_not_truthiness(monkeypatch) -> None:
+    """Pins the class's 'Requirements on adopters' contract: the predicate must be
+    ``_submitted_answers is not None``. An empty list is falsy but not None, so a
+    truthiness predicate would keep waiting on a batch that had already landed.
+    Unreachable through submit_answers today (it rejects an empty batch) -- which
+    is exactly why the predicate itself, not the handler, is asserted here."""
+    wf = _Workflow()
+    fake = _install_wait(
+        monkeypatch,
+        _FakeWaitCondition(lambda: wf.submit_answers({"resume_token": "tok-1", "answers": [_answer("q1")]})),
+    )
+
+    await wf.wait_for_answers("tok-1")
+
+    predicate = fake.predicates[0]
+    wf._submitted_answers = None
+    assert predicate() is False
+    wf._submitted_answers = []
+    assert predicate() is True
+
+
+@pytest.mark.asyncio
+async def test_wait_for_answers_never_passes_a_timeout(monkeypatch) -> None:
+    """The no-default guarantee at its source: a ``timeout=`` on wait_condition
+    would release the wait without a real answer, which is the fabricated-resume
+    failure this whole mechanism exists to prevent."""
+    wf = _Workflow()
+    fake = _install_wait(
+        monkeypatch,
+        _FakeWaitCondition(lambda: wf.submit_answers({"resume_token": "tok-1", "answers": [_answer("q1")]})),
+    )
+
+    await wf.wait_for_answers("tok-1")
+
+    assert fake.kwargs == [{}]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad_token", ["", None, 0, b"tok-1"])
+async def test_wait_for_answers_rejects_a_non_string_or_empty_resume_token(monkeypatch, bad_token) -> None:
+    """A falsy or non-str token can never equal a submitter's echoed token, so the
+    predicate would be permanently unsatisfiable -- fail at the call site instead
+    of stranding the workflow in a wait nothing can release."""
+    wf = _Workflow()
+    _install_wait(monkeypatch, _FakeWaitCondition())
+
+    with pytest.raises(AssertionError, match="non-empty resume_token"):
+        await wf.wait_for_answers(bad_token)
+
+
+@pytest.mark.asyncio
+async def test_wait_for_answers_rejects_a_non_callable_verify(monkeypatch) -> None:
+    """Checked up front rather than at the first await: a non-callable would
+    otherwise surface as a TypeError from inside an already-parked workflow."""
+    wf = _Workflow()
+    _install_wait(monkeypatch, _FakeWaitCondition())
+
+    with pytest.raises(AssertionError, match="zero-argument callable"):
+        await wf.wait_for_answers("tok-1", verify="tok-1")
+
+
+@pytest.mark.asyncio
+async def test_wait_for_answers_verify_releases_the_wait_with_no_signal_at_all(monkeypatch) -> None:
+    """A durable batch can exist with no signal to match it -- the early-arrived
+    signal was evicted past MAX_BUFFERED_SIGNALS, or never sent. verify is checked
+    BEFORE parking so the wait doesn't hang for a signal that will never come; the
+    None return tells the caller to read the batch back from its own store."""
+    wf = _Workflow()
+    verifier = _Verifier(True)
+    fake = _install_wait(monkeypatch, _FakeWaitCondition())
+
+    result = await wf.wait_for_answers("tok-1", verify=verifier)
+
+    assert result is None
+    assert verifier.calls == 1
+    assert fake.satisfied_at_call == []
+    assert wf._active_resume_token is None
+
+
+@pytest.mark.asyncio
+async def test_wait_for_answers_verify_rejects_an_unbacked_signal_and_keeps_waiting(monkeypatch) -> None:
+    """A signal is a wake-up hint, never the answer itself. A signal whose batch the
+    durable store cannot confirm re-arms the latch rather than resuming the
+    workflow, so a sender that signals without persisting cannot fabricate a
+    resume."""
+    wf = _Workflow()
+    verifier = _Verifier(False, False, True)
+    fake = _install_wait(
+        monkeypatch,
+        _FakeWaitCondition(lambda: wf.submit_answers({"resume_token": "tok-1", "answers": [_answer("q1")]})),
+    )
+
+    result = await wf.wait_for_answers("tok-1", verify=verifier)
+
+    assert result is None
+    assert verifier.calls == 3
+    assert fake.satisfied_at_call == [False]
+    assert wf._submitted_answers is None
+    assert wf._active_resume_token is None
+
+
+@pytest.mark.asyncio
+async def test_wait_for_answers_verify_returns_the_batch_once_confirmed(monkeypatch) -> None:
+    """The ordinary verify path: a signal lands, the durable store confirms it, and
+    the in-memory batch is returned rather than forcing a redundant read-back."""
+    wf = _Workflow()
+    batch = [_answer("q1", selected_option_id="yes")]
+    verifier = _Verifier(False, True)
+    _install_wait(
+        monkeypatch,
+        _FakeWaitCondition(lambda: wf.submit_answers({"resume_token": "tok-1", "answers": batch})),
+    )
+
+    result = await wf.wait_for_answers("tok-1", verify=verifier)
+
+    assert result == batch
+    assert verifier.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_wait_for_answers_stays_parked_through_a_mismatched_token_signal(monkeypatch) -> None:
+    """End to end across both halves: a signal for a different pause round is
+    rejected by the handler and leaves the predicate unsatisfied, so the wait keeps
+    waiting for the token it actually armed."""
+    wf = _Workflow()
+    batch = [_answer("q1", selected_option_id="yes")]
+
+    def _deliver() -> None:
+        wf.submit_answers({"resume_token": "wrong-token", "answers": [_answer("q9")]})
+        assert wf._submitted_answers is None
+        wf.submit_answers({"resume_token": "tok-1", "answers": batch})
+
+    _install_wait(monkeypatch, _FakeWaitCondition(_deliver))
+
+    assert await wf.wait_for_answers("tok-1") == batch

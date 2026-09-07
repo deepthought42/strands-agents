@@ -30,9 +30,15 @@ that token as its own active pause, under a different signal name and a
 different validation/buffering contract. A workflow needing both gate kinds
 must not use both mixins until they converge onto one implementation.
 
-Deliberately excludes any ``wait_condition``-based wait/resume logic — this
-module only registers and validates; a workflow durably pausing on
-``self._submitted_answers`` is separate, follow-on work. A signal handler
+Also provides the waiting half: ``HitlAnswerSignalMixin.wait_for_answers``
+arms a pause for a ``resume_token``, drains any signal that arrived before the
+wait began, and suspends on ``workflow.wait_condition`` until a validated,
+token-matching batch lands. It has no timeout and no default-answer path, so a
+workflow nobody answers stays paused rather than resuming with something
+fabricated. What is still NOT here is the wiring: nothing in this module reads
+a job store, schedules an activity, or knows what a pause means to a given
+team — a caller with a durable answer store passes ``verify`` to reconcile
+against it. A signal handler
 must never raise (Temporal replays workflow history, so an unhandled
 exception here would fail identically forever), so every validation failure
 here is a non-raising, state-preserving rejection: the payload is dropped,
@@ -49,7 +55,7 @@ Postconditions:
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from pydantic import ValidationError
 from temporalio import workflow
@@ -191,16 +197,17 @@ class HitlAnswerSignalMixin:
     its backing buffer/reject/accept state machine.
 
     Invariants:
-        - ``self._active_resume_token`` is non-``None`` only while a subclass
-          has armed a pause for that token (arming/consuming is this mixin's
-          caller's responsibility — not provided here, see module docstring)
-          — so ``submit_answers`` can tell a fresh submission for the CURRENT
-          pause apart from a stale one for an already-resolved pause.
+        - ``self._active_resume_token`` is non-``None`` only while a pause is
+          armed for that token — between :meth:`wait_for_answers` arming it
+          and that same call returning (or a subclass driving the three
+          attributes itself, as ``CodingTeamWorkflow`` does inline) — so
+          ``submit_answers`` can tell a fresh submission for the CURRENT pause
+          apart from a stale one for an already-resolved pause.
         - ``self._submitted_answers`` is non-``None`` only in the narrow
           window between a validated, token-matching ``submit_answers``
-          signal being delivered and a caller consuming it — so a stale
-          answer batch from one pause round can never be mistaken for a
-          fresh one in the next.
+          signal being delivered and a waiter consuming it (which resets it to
+          ``None`` before returning) — so a stale answer batch from one pause
+          round can never be mistaken for a fresh one in the next.
         - ``self._buffered_signals`` holds at most one early-arrived, validated
           answer batch per not-yet-armed ``resume_token``, and never more than
           ``MAX_BUFFERED_SIGNALS`` distinct tokens at once — the oldest entry
@@ -215,8 +222,9 @@ class HitlAnswerSignalMixin:
           this makes the first delivered signal raise ``AttributeError``
           inside the handler, the permanent-strand failure mode this module
           exists to prevent.
-        - A step-2 consumer waiting on this state (e.g. a
-          ``workflow.wait_condition`` predicate) MUST test
+        - Any consumer waiting on this state — :meth:`wait_for_answers`
+          below, or a subclass driving its own ``workflow.wait_condition``
+          predicate as ``CodingTeamWorkflow`` still does — MUST test
           ``self._submitted_answers is not None``, never truthiness: that is
           the only reliable "has a signal landed" test. It happens to be
           moot today only because ``submit_answers`` never stores an empty
@@ -409,3 +417,128 @@ class HitlAnswerSignalMixin:
             )
             return
         self._submitted_answers = answers
+
+    async def wait_for_answers(
+        self,
+        resume_token: str,
+        *,
+        verify: Optional[Callable[[], Awaitable[bool]]] = None,
+    ) -> Optional[List[Dict[str, Any]]]:
+        """Durably suspend this workflow until a matching ``submit_answers`` signal
+        lands -- or, with ``verify``, until a durable answer batch is confirmed for
+        ``resume_token`` -- then return the delivered answers.
+
+        The waiting half of the mechanism whose receiving half is
+        :meth:`submit_answers`. The arm/drain/clear/consume sequence is the one
+        ``CodingTeamWorkflow.run`` already runs inline
+        (``software_engineering_team/temporal/coding_team_workflow.py``) and
+        ``planning_team.temporal.answer_signal.PlanningAnswerSignalMixin.wait_for_planning_answers``
+        already packages -- deliberately the same underlying approach rather than a
+        divergent one.
+
+        The optional ``verify`` predicate exists because a signal is a wake-up HINT,
+        not the answer itself: an early-arrived batch can be evicted from
+        ``_buffered_signals`` once past ``MAX_BUFFERED_SIGNALS``, and a sender can
+        signal without having durably persisted anything. When the caller has a
+        durable answer store, ``verify`` is what makes the wait trust that store
+        rather than the signal. It is a caller-supplied predicate rather than a
+        store read performed here so this mixin stays free of job-store knowledge
+        and usable by any team.
+
+        Preconditions:
+            - ``resume_token`` is a non-empty ``str`` uniquely identifying this pause
+              round -- the same token the paused activity's result carried, and the
+              one a submitter must echo back in its signal payload.
+            - Called only from inside ``@workflow.defn`` code: ``workflow.wait_condition``
+              is valid nowhere else.
+            - ``verify``, when given, is a zero-argument callable returning an
+              awaitable ``bool``, and is itself REPLAY-SAFE -- it must await an
+              activity (or otherwise be deterministic under replay), never read a
+              clock, generate randomness, or perform direct I/O from workflow code.
+              It is the one non-determinism this method cannot check on the caller's
+              behalf.
+            - No other coroutine in this workflow is inside ``wait_for_answers``
+              concurrently. The three mixin attributes describe a single pause, so
+              two overlapping waits would arm over each other's token.
+
+        Postconditions:
+            - Arms the pause (``self._active_resume_token = resume_token``), applies
+              any batch already buffered under that token, and clears
+              ``self._buffered_signals`` ENTIRELY. This is what makes a signal that
+              arrived BEFORE the wait began a hit rather than a loss -- the buffered
+              flag is checked, not only awaited -- and it stops a stale entry for
+              some other token from leaking into a later pause round.
+            - With ``verify`` omitted: suspends on
+              ``workflow.wait_condition(lambda: self._submitted_answers is not None)``
+              -- ``is not None``, never truthiness, per this class's "Requirements on
+              adopters" -- and returns that list. Never returns ``None``.
+            - With ``verify`` supplied: the wait is released only once ``verify()``
+              answers ``True``. A signal whose batch ``verify()`` cannot confirm
+              re-arms the latch and the wait resumes, so an unbacked signal cannot
+              resume the workflow. The return value is then the in-memory batch when
+              one was accepted, or ``None`` when the durable check alone released the
+              wait -- in which case the caller reads the batch back from wherever
+              ``verify`` confirmed it.
+            - Resets ``self._active_resume_token`` and ``self._submitted_answers`` to
+              ``None`` before returning, so the next pause round starts clean.
+            - THERE IS NO TIMEOUT, NO DEFAULT, AND NO AUTO-ANSWER PATH. Nothing in
+              this method can release the wait except a validated, token-matching
+              signal (or a ``verify``-confirmed durable batch). A workflow nobody
+              answers stays paused indefinitely -- that is the guarantee, not a gap
+              in it.
+
+        Replay safety: the body touches only in-memory workflow state and awaits
+        ``workflow.wait_condition``, a deterministic SDK primitive. No
+        ``workflow.now()``, no ``datetime``, no ``random``/``uuid``, no
+        ``os.getenv``, no I/O, and no ``asyncio`` primitive of its own -- so a worker
+        restart mid-wait replays history to exactly this suspension point and
+        resumes from it. ``_buffered_signals`` is touched only via ``pop``/``clear``,
+        whose effects depend on insertion order, which is itself derived from
+        replayed signal-event order.
+
+        Known limitation, inherited verbatim from ``CodingTeamWorkflow``'s own wait:
+        the ``wait_condition`` is unbounded, so an out-of-band job cancellation
+        recorded outside this workflow does not interrupt it, and a
+        ``CancelledError`` raised during the wait unwinds with the pause still armed.
+        Reconciling cancellation with the wait is deliberately unsolved here --
+        adding a timeout to solve it would be exactly the default-answer path this
+        method must not have.
+        """
+        assert isinstance(resume_token, str) and resume_token, "wait_for_answers requires a non-empty resume_token"
+        # Checked here rather than at the first await site: a non-callable (e.g. a
+        # token string passed positionally by mistake) would otherwise stay silent
+        # until the wait actually re-checks, and surface as a TypeError from inside
+        # a parked workflow -- the one place a clear message is hardest to come by.
+        assert verify is None or callable(verify), "wait_for_answers requires a zero-argument callable verify, or None"
+        self._active_resume_token = resume_token
+        self._submitted_answers = self._buffered_signals.pop(resume_token, None)
+        self._buffered_signals.clear()
+
+        if verify is None:
+            await workflow.wait_condition(lambda: self._submitted_answers is not None)
+        else:
+            while True:
+                if self._submitted_answers is None:
+                    # Checked BEFORE parking: the durable batch may already be there
+                    # (its signal evicted from the buffer, or never sent at all), in
+                    # which case parking would wait for a signal that never comes.
+                    if await verify():
+                        break
+                    await workflow.wait_condition(lambda: self._submitted_answers is not None)
+                if await verify():
+                    break
+                # Rogue/unbacked signal: the latch fired but the durable store holds
+                # no batch for this token. Re-arm and loop -- the top of the loop
+                # re-checks once more before parking again, which catches a
+                # submission that landed while this check was in flight.
+                self._submitted_answers = None
+
+        answers = self._submitted_answers
+        self._submitted_answers = None
+        self._active_resume_token = None
+        # Not merely defensive: with no verify, wait_condition's predicate IS
+        # "_submitted_answers is not None", so a None here would mean the SDK
+        # released the wait on an unsatisfied predicate.
+        if verify is None:
+            assert answers is not None
+        return answers

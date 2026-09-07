@@ -7,24 +7,22 @@ job, which these tests keep above the 90% floor.
 
 ``shared.hitl.temporal_signal`` (below) is a different flavor of gap: it was
 extracted straight into ``shared/hitl/`` rather than migrated out of SE, and
-its only consumer today is ``planning_team.temporal.workflows.PlanningWorkflow``
--- Planning has no dedicated CI test job of its own (its ``tests/`` directory
-isn't in this workflow's per-team matrix), so nothing else in CI exercises it.
-These tests keep it above the 90% floor until either Planning gains its own
-CI job or ``CodingTeamWorkflow`` migrates onto this shared primitive (see
-``shared/hitl/temporal_signal.py``'s module docstring).
+its only consumer today is ``planning_team.temporal.workflows.PlanningWorkflow``.
 
-More thorough, standalone-mixin behavioral coverage lives in
-``shared/hitl/tests/test_temporal_signal.py`` (the canonical suite for the
-mixin's contract -- update it first when the contract changes, then mirror
-here) and ``planning_team/tests/test_temporal_workflow_signal.py`` -- useful
-for local development and as documentation, but neither runs in CI today for
-the same reason (no CI job passes ``shared/hitl/tests/`` or
-``planning_team/tests/`` to pytest). This file is therefore the only
-CI-enforced regression coverage for this behavior, so it also carries a
-minimal check that the real ``PlanningWorkflow`` class (not just the
-standalone mixin) actually wires up correctly -- the composition-level
-assertions those uncollected suites would otherwise be the sole guard for.
+The mixin's own behavioral contract is NOT this file's job. That lives in
+``shared/hitl/tests/test_temporal_signal.py`` -- the canonical suite -- which
+CI does collect (the shared-packages job passes ``../shared/hitl/tests`` to
+pytest and feeds the same combined shared-infra gate this file feeds). Adding
+a second copy of a mixin assertion here buys no CI coverage and gives the two
+suites room to drift, so put new mixin cases in the canonical suite only.
+
+What genuinely has no other CI-enforced home is the COMPOSITION check at the
+end of this file: that the real ``PlanningWorkflow`` class, not just the
+standalone mixin, wires up correctly. ``planning_team/tests/`` is in no CI
+job's matrix, so ``planning_team/tests/test_temporal_workflow_signal.py``
+never runs. The mixin-level cases above predate that realization and are left
+as-is rather than churned in an unrelated change; they should be dropped, or
+this file reduced to the composition check, once Planning gains a CI job.
 """
 
 from __future__ import annotations
