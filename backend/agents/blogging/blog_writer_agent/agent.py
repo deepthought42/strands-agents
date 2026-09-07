@@ -1006,6 +1006,9 @@ class BlogWriterAgent(_BlogAgentBase):
             # output to a single object, so a JSON-mode call can wrap or empty
             # the array. ``extract_json_array_from_text`` extracts ``[...]``
             # from prose, skipping Markdown links and other non-array ``[``.
+            # Deliberately does not carry self._writing_system_prompt_with_content:
+            # this call scans a draft for uncertainty, it does not generate brand/
+            # style-governed prose, so it uses its own minimal persona instead.
             raw = self._call_text(
                 prompt,
                 system_prompt="You are a careful writing assistant that identifies areas of genuine uncertainty.",
@@ -1067,6 +1070,9 @@ class BlogWriterAgent(_BlogAgentBase):
             current_guidelines=current_guidelines,
         )
         try:
+            # Deliberately omits system_prompt (falls back to bare WRITING_SYSTEM_PROMPT):
+            # this call extracts guideline-update suggestions from user feedback, it does
+            # not generate blog prose, so the brand/style segment is not relevant here.
             data = self._call_agent_json(prompt)
             if not isinstance(data, dict):
                 return []
@@ -1320,6 +1326,9 @@ class BlogWriterAgent(_BlogAgentBase):
             persistent_issues=persistent_text,
         )
         try:
+            # Deliberately omits system_prompt (falls back to bare WRITING_SYSTEM_PROMPT):
+            # this call summarizes the copy-edit loop's status for the user, it does not
+            # generate blog prose, so the brand/style segment is not relevant here.
             summary = self._call_text(prompt)
             return (summary or "").strip()
         except Exception as e:

@@ -113,3 +113,99 @@ def test_revise_generates_plan_then_applies_all_feedback() -> None:
 
     assert "# Revised title" in out.draft
     assert "Body here." in out.draft
+
+
+# ---------------------------------------------------------------------------
+# system_prompt_content forwarding (issue #7895): revise()'s two model-call
+# routes for the batch-execute step (_call_text primary, _fallback_draft_via_json
+# JSON fallback) must each carry the cached brand/style segment list through
+# unmodified. The plan-generation step (revision.generate_revision_plan) is a
+# separate, structural JSON call that never carried brand/style text and is
+# out of scope here -- its call_json is stubbed below purely to let revise()
+# reach the batch-execute step under test.
+# ---------------------------------------------------------------------------
+
+_PLAN_STUB = {"summary": "plan", "changes": [], "risks": []}
+
+
+def _one_feedback_item():
+    return [
+        FeedbackItem(
+            category="style",
+            severity="must_fix",
+            location="intro",
+            issue="Opening is weak.",
+            suggestion="Add a concrete hook.",
+        ),
+    ]
+
+
+def test_revise_primary_path_forwards_system_prompt_content(monkeypatch) -> None:
+    """revise()'s batch-execute call (the step that actually rewrites prose) passes the
+    cached brand/style segment list to _call_text, mirroring run()'s primary path."""
+    from agents.blogging.blog_writer_agent.agent import BlogWriterAgent
+
+    agent = make_writer_agent(
+        writing_style_guide_content="Use short paragraphs.",
+        brand_spec_content="Brand voice: practical and direct.",
+    )
+    monkeypatch.setattr(
+        BlogWriterAgent,
+        "_call_agent_json",
+        lambda self, p, system_prompt="", **kw: _PLAN_STUB,
+    )
+    captured: dict = {}
+
+    def fake_call_text(self, p, system_prompt=""):
+        captured["system_prompt"] = system_prompt
+        return '{"draft": 0}\n---DRAFT---\n# Revised\nBody.'
+
+    monkeypatch.setattr(BlogWriterAgent, "_call_text", fake_call_text)
+
+    inp = ReviseWriterInput(
+        draft="# Original\n\nOld body.\n",
+        feedback_items=_one_feedback_item(),
+        content_plan=_minimal_plan(),
+    )
+    out = agent.revise(inp)
+    assert "Revised" in out.draft
+    assert captured["system_prompt"] is agent._writing_system_prompt_with_content
+
+
+def test_revise_json_fallback_forwards_system_prompt_content(monkeypatch) -> None:
+    """revise()'s JSON fallback (_fallback_draft_via_json, reached once the text path
+    exhausts its retries) also passes the cached brand/style segment list -- this is the
+    fourth "route to the model" issue #7895 names, and it bypasses _call_agent entirely
+    so it needs its own forwarding check."""
+    from agents.blogging.blog_writer_agent.agent import BlogWriterAgent
+
+    agent = make_writer_agent(
+        writing_style_guide_content="Use short paragraphs.",
+        brand_spec_content="Brand voice: practical and direct.",
+    )
+    monkeypatch.setattr(
+        BlogWriterAgent,
+        "_call_agent_json",
+        lambda self, p, system_prompt="", **kw: _PLAN_STUB,
+    )
+    monkeypatch.setattr(
+        BlogWriterAgent,
+        "_call_text",
+        lambda self, p, system_prompt="": "no marker here",
+    )
+    captured: dict = {}
+
+    def fake_fallback(self, p, system_prompt=""):
+        captured["system_prompt"] = system_prompt
+        return "# Fallback draft"
+
+    monkeypatch.setattr(BlogWriterAgent, "_fallback_draft_via_json", fake_fallback)
+
+    inp = ReviseWriterInput(
+        draft="# Original\n\nOld body.\n",
+        feedback_items=_one_feedback_item(),
+        content_plan=_minimal_plan(),
+    )
+    out = agent.revise(inp)
+    assert out.draft == "# Fallback draft"
+    assert captured["system_prompt"] is agent._writing_system_prompt_with_content

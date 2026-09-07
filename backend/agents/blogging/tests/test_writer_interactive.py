@@ -1031,3 +1031,57 @@ def test_revise_wrapped_json_parse_error_retries_then_fallback(monkeypatch) -> N
     assert "Batch Recovered From Parse Error" in out.draft
     assert sleep_calls == []
     assert call_count > 1
+
+
+# ---------------------------------------------------------------------------
+# system_prompt_content forwarding (issue #7895): revise_from_user_feedback()'s
+# two model-call routes (_call_text primary, _fallback_draft_via_json JSON
+# fallback) must each carry the cached brand/style segment list through
+# unmodified.
+# ---------------------------------------------------------------------------
+
+
+def test_revise_from_user_feedback_primary_path_forwards_system_prompt_content(monkeypatch) -> None:
+    """revise_from_user_feedback()'s primary text-completion call passes the cached
+    brand/style segment list to _call_text, unmodified."""
+    from agents.blogging.blog_writer_agent.agent import BlogWriterAgent
+
+    a = _make_agent()
+    captured: dict = {}
+
+    def fake_call_text(self, prompt, system_prompt=""):
+        captured["system_prompt"] = system_prompt
+        return '{"draft": 0}\n---DRAFT---\n# Revised\nBody.'
+
+    monkeypatch.setattr(BlogWriterAgent, "_call_text", fake_call_text)
+    out = a.revise_from_user_feedback(
+        draft="# Old\nBody", user_feedback="x", content_plan_text="cp"
+    )
+    assert "Revised" in out.draft
+    assert captured["system_prompt"] is a._writing_system_prompt_with_content
+
+
+def test_revise_from_user_feedback_json_fallback_forwards_system_prompt_content(
+    monkeypatch,
+) -> None:
+    """revise_from_user_feedback()'s JSON fallback (_fallback_draft_via_json) is the
+    fourth "route to the model" named in issue #7895 -- it bypasses _call_agent entirely,
+    so it needs its own check that it still receives the cached brand/style segment list."""
+    from agents.blogging.blog_writer_agent.agent import BlogWriterAgent
+
+    a = _make_agent()
+    captured: dict = {}
+    monkeypatch.setattr(
+        BlogWriterAgent,
+        "_call_text",
+        lambda self, prompt, system_prompt="": "no marker here",
+    )
+
+    def fake_fallback(self, p, system_prompt=""):
+        captured["system_prompt"] = system_prompt
+        return "# Fallback"
+
+    monkeypatch.setattr(BlogWriterAgent, "_fallback_draft_via_json", fake_fallback)
+    out = a.revise_from_user_feedback(draft="# Original", user_feedback="x", content_plan_text="cp")
+    assert "# Fallback" in out.draft
+    assert captured["system_prompt"] is a._writing_system_prompt_with_content

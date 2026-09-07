@@ -365,3 +365,53 @@ def test_blog_writer_agent_falls_back_when_llm_client_is_not_strands_model() -> 
     )
     assert agent._model is raw_client
     assert agent._text_model is raw_client
+
+
+# ---------------------------------------------------------------------------
+# system_prompt_content degradation (issue #7895, AC "passing no segments
+# reproduces today's exact Agent construction"): a writer with no brand/style
+# content, and _call_agent called with no system_prompt at all, must both
+# fall back to the bare WRITING_SYSTEM_PROMPT string -- never a one-element
+# content-block list -- so a non-caching client sees byte-identical input.
+# ---------------------------------------------------------------------------
+
+
+def test_writing_system_prompt_with_content_is_plain_string_when_blank() -> None:
+    """With no brand/style content, _writing_system_prompt_with_content degrades to the
+    plain WRITING_SYSTEM_PROMPT string -- not a one-element list -- so a writer with no
+    guidelines configured reproduces today's exact (pre-caching) Agent(system_prompt=...)
+    construction. (_assert_guidelines_present blocks real use of such a writer, but the
+    attribute itself must still degrade correctly, e.g. for _call_agent's own
+    "system_prompt or WRITING_SYSTEM_PROMPT" fallback to be a no-op here.)"""
+    from agents.blogging.blog_writer_agent.prompts import WRITING_SYSTEM_PROMPT
+
+    agent = make_writer_agent(brand_spec_content="", writing_style_guide_content="   ")
+
+    assert agent._system_prompt_content is None
+    assert agent._writing_system_prompt_with_content == WRITING_SYSTEM_PROMPT
+    assert isinstance(agent._writing_system_prompt_with_content, str)
+
+
+def test_call_agent_with_no_system_prompt_builds_plain_string_agent(monkeypatch) -> None:
+    """_call_agent's documented "no segments -> today's exact Agent construction"
+    postcondition: with system_prompt omitted, Agent is built with a bare persona
+    string, not a content-block list."""
+    import agents.blogging.blog_writer_agent.agent as agent_module
+
+    captured: dict = {}
+
+    class _FakeAgent:
+        def __init__(self, *, model, system_prompt):
+            captured["model"] = model
+            captured["system_prompt"] = system_prompt
+
+        def __call__(self, prompt):
+            return "response"
+
+    monkeypatch.setattr(agent_module, "Agent", _FakeAgent)
+    a = make_writer_agent()
+    out = a._call_agent("some-model", "a prompt")
+    assert out == "response"
+    assert captured["model"] == "some-model"
+    assert captured["system_prompt"] == agent_module.WRITING_SYSTEM_PROMPT
+    assert isinstance(captured["system_prompt"], str)

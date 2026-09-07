@@ -42,7 +42,9 @@ def test_writer_run_happy_with_all_options(monkeypatch, tmp_path) -> None:
         lambda self, p, system_prompt="": '{"draft": 0}\n---DRAFT---\n# A Title\nBody.\n',
     )
     # Disable the self-review path so tests stay deterministic
-    monkeypatch.setattr(BlogWriterAgent, "_self_review", lambda self, d, allowed_claims_section="": d)
+    monkeypatch.setattr(
+        BlogWriterAgent, "_self_review", lambda self, d, allowed_claims_section="": d
+    )
 
     output_path = tmp_path / "draft.md"
     out = a.run(
@@ -158,7 +160,9 @@ def test_writer_run_json_parse_error_then_json_fallback(monkeypatch) -> None:
         "_call_agent_json",
         lambda self, p, **kw: {"draft": "# Fallback\nBody."},
     )
-    monkeypatch.setattr(BlogWriterAgent, "_self_review", lambda self, d, allowed_claims_section="": d)
+    monkeypatch.setattr(
+        BlogWriterAgent, "_self_review", lambda self, d, allowed_claims_section="": d
+    )
     out = a.run(_writer_input())
     assert "Fallback" in out.draft
 
@@ -183,7 +187,9 @@ def test_writer_run_wrapped_json_parse_error_then_json_fallback(monkeypatch) -> 
         "_call_agent_json",
         lambda self, p, **kw: {"draft": "# Unwrapped Fallback\nBody."},
     )
-    monkeypatch.setattr(BlogWriterAgent, "_self_review", lambda self, d, allowed_claims_section="": d)
+    monkeypatch.setattr(
+        BlogWriterAgent, "_self_review", lambda self, d, allowed_claims_section="": d
+    )
     out = a.run(_writer_input())
     assert "Unwrapped Fallback" in out.draft
 
@@ -304,7 +310,9 @@ def test_writer_run_default_length_guidance(monkeypatch) -> None:
         return '{"draft": 0}\n---DRAFT---\n# Out\nBody.'
 
     monkeypatch.setattr(BlogWriterAgent, "_call_text", fake_call)
-    monkeypatch.setattr(BlogWriterAgent, "_self_review", lambda self, d, allowed_claims_section="": d)
+    monkeypatch.setattr(
+        BlogWriterAgent, "_self_review", lambda self, d, allowed_claims_section="": d
+    )
     a.run(_writer_input(length_guidance=""))
     assert "TARGET LENGTH" in captured["prompt"]
 
@@ -468,3 +476,96 @@ def test_fallback_draft_via_json_agent_construction_error_returns_none(monkeypat
 
     monkeypatch.setattr(json_retry_mod, "Agent", _BadAgent)
     assert a._fallback_draft_via_json("prompt") is None
+
+
+# ---------------------------------------------------------------------------
+# system_prompt_content forwarding (issue #7895): run()'s two model-call
+# routes (_call_text primary, _call_agent_json fallback) and the standalone
+# _fallback_draft_via_json primitive must each carry the cached brand/style
+# segment list through unmodified. These pin the wiring so it cannot be
+# silently deleted -- the existing tests above patch these methods with
+# lambdas that accept but never assert on system_prompt, so none of them
+# would catch a dropped kwarg.
+# ---------------------------------------------------------------------------
+
+
+def test_writer_run_text_path_forwards_system_prompt_content(monkeypatch) -> None:
+    """run()'s primary text-draft call passes the cached brand/style segment list to
+    _call_text unmodified -- deleting the system_prompt kwarg at the call site would
+    silently drop brand/style context, and this test would catch it."""
+    from agents.blogging.blog_writer_agent.agent import BlogWriterAgent
+
+    a = _agent()
+    captured: dict = {}
+
+    def fake_call_text(self, p, system_prompt=""):
+        captured["system_prompt"] = system_prompt
+        return '{"draft": 0}\n---DRAFT---\n# A Title\nBody.\n'
+
+    monkeypatch.setattr(BlogWriterAgent, "_call_text", fake_call_text)
+    monkeypatch.setattr(
+        BlogWriterAgent, "_self_review", lambda self, d, allowed_claims_section="": d
+    )
+
+    out = a.run(_writer_input())
+    assert "A Title" in out.draft
+    assert captured["system_prompt"] is a._writing_system_prompt_with_content
+
+
+def test_writer_run_json_fallback_forwards_system_prompt_content(monkeypatch) -> None:
+    """run()'s JSON-mode fallback (triggered when the text path raises LLMJsonParseError)
+    also passes the cached brand/style segment list to _call_agent_json -- the fallback is
+    exactly the path that must not silently lose brand/style context."""
+    from agents.blogging.blog_writer_agent.agent import BlogWriterAgent
+
+    from llm_service import LLMJsonParseError
+
+    a = _agent()
+    captured: dict = {}
+    monkeypatch.setattr(
+        BlogWriterAgent,
+        "_call_text",
+        lambda self, p, system_prompt="": (_ for _ in ()).throw(
+            LLMJsonParseError("bad draft text")
+        ),
+    )
+
+    def fake_call_agent_json(self, p, system_prompt=""):
+        captured["system_prompt"] = system_prompt
+        return {"draft": "# Fallback\nBody."}
+
+    monkeypatch.setattr(BlogWriterAgent, "_call_agent_json", fake_call_agent_json)
+    monkeypatch.setattr(
+        BlogWriterAgent, "_self_review", lambda self, d, allowed_claims_section="": d
+    )
+    out = a.run(_writer_input())
+    assert "Fallback" in out.draft
+    assert captured["system_prompt"] is a._writing_system_prompt_with_content
+
+
+def test_fallback_draft_via_json_forwards_system_prompt_to_run_json_gate(monkeypatch) -> None:
+    """_fallback_draft_via_json is the fourth route named in issue #7895 -- it bypasses
+    _call_agent entirely (constructing its Agent inside shared/json_retry.py instead), so
+    it needs its own check that it forwards whatever system_prompt it is given straight
+    through to run_json_gate, unmodified."""
+    from llm_service import CacheBreakpoint
+
+    a = _agent()
+    captured: dict = {}
+
+    def fake_gate(model, system_prompt, prompt, **kwargs):
+        captured["system_prompt"] = system_prompt
+        return {"draft": "# From JSON"}
+
+    monkeypatch.setattr(
+        "agents.blogging.blog_writer_agent.agent.run_json_gate",
+        fake_gate,
+    )
+    segments = a._writing_system_prompt_with_content
+    out = a._fallback_draft_via_json("revise this draft", system_prompt=segments)
+    assert out == "# From JSON"
+    assert captured["system_prompt"] is segments
+    assert isinstance(segments, list)
+    segment = segments[1]
+    assert isinstance(segment, CacheBreakpoint)
+    assert "Brand" in segment.text
