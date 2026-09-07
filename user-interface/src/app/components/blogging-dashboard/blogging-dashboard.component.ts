@@ -40,18 +40,20 @@ const TERMINAL_STATUSES = ['completed', 'needs_human_review', 'failed', 'interru
 const POLL_JOBS_MS = 60000;
 const POLL_STATUS_MS = 60000;
 
-/** Pipeline phases in execution order for the phase stepper. */
+/** Pipeline phases in execution order for the phase stepper. Title selection now
+ * runs at the end of planning (before the draft is written), matching the
+ * backend's PHASE_ORDER in shared/models.py. */
 const PIPELINE_PHASES = [
   { key: 'research', label: 'Research' },
   { key: 'planning', label: 'Planning' },
   { key: 'story_elicitation', label: 'Stories' },
+  { key: 'title_selection', label: 'Title' },
   { key: 'draft_initial', label: 'Draft' },
   { key: 'draft_review', label: 'Review' },
   { key: 'copy_edit', label: 'Copy Edit' },
   { key: 'fact_check', label: 'Fact Check' },
   { key: 'compliance', label: 'Compliance' },
   { key: 'rewrite', label: 'Rewrite' },
-  { key: 'title_selection', label: 'Title' },
   { key: 'finalize', label: 'Finalize' },
 ] as const;
 

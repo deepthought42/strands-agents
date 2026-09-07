@@ -27,16 +27,19 @@ class BlogPhase(str, Enum):
     FINALIZE = "finalize"
 
 
-# Progress ranges for each phase (min, max percentage)
+# Progress ranges for each phase (min, max percentage). TITLE_SELECTION sits
+# right after PLANNING (not before FINALIZE): the author now picks the title at
+# the end of planning, before the draft is written, so its range must reflect
+# where in the run it actually happens rather than where it used to run.
 PHASE_PROGRESS_RANGES: Dict[BlogPhase, tuple[int, int]] = {
-    BlogPhase.PLANNING: (0, 15),
+    BlogPhase.PLANNING: (0, 12),
+    BlogPhase.TITLE_SELECTION: (12, 15),
     BlogPhase.DRAFT_INITIAL: (15, 30),
     BlogPhase.DRAFT_REVIEW: (30, 45),
     BlogPhase.COPY_EDIT_LOOP: (45, 60),
     BlogPhase.FACT_CHECK: (60, 70),
     BlogPhase.COMPLIANCE: (70, 82),
-    BlogPhase.REWRITE_LOOP: (82, 90),
-    BlogPhase.TITLE_SELECTION: (90, 96),
+    BlogPhase.REWRITE_LOOP: (82, 96),
     BlogPhase.FINALIZE: (96, 100),
 }
 
@@ -58,13 +61,13 @@ def get_phase_progress(phase: BlogPhase, sub_progress: float = 0.0) -> int:
 # Phase order for tracking completed phases
 PHASE_ORDER = [
     BlogPhase.PLANNING,
+    BlogPhase.TITLE_SELECTION,
     BlogPhase.DRAFT_INITIAL,
     BlogPhase.DRAFT_REVIEW,
     BlogPhase.COPY_EDIT_LOOP,
     BlogPhase.FACT_CHECK,
     BlogPhase.COMPLIANCE,
     BlogPhase.REWRITE_LOOP,
-    BlogPhase.TITLE_SELECTION,
     BlogPhase.FINALIZE,
 ]
 

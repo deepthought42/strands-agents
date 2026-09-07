@@ -17,7 +17,7 @@ from temporalio.exceptions import CancelledError
 from llm_service.interface import LLMRateLimitError, LLMTemporaryError
 from shared.concurrency import parallel_map
 
-from ._common import _load_required_guidelines, _make_update, _run_title_selection
+from ._common import _load_required_guidelines, _make_update
 from .constants import BRAND_SPEC_PROMPT_PATH
 from .context import PipelineContext, PipelineStatus
 
@@ -29,14 +29,16 @@ def run_gates_stage(ctx: "PipelineContext") -> None:
 
     Args:
         ctx: The shared ``PipelineContext``. Reads ``brief``, ``work_dir``,
-            ``llm_client``, ``length_policy``, ``job_id``, ``job_updater``,
+            ``llm_client``, ``length_policy``, ``job_updater``,
             ``max_rewrite_iterations``, ``run_gates``, ``plan``,
             ``elicited_stories_text``, ``selected_title``, and ``draft_result``;
             writes the final ``draft_result`` and ``status``.
     Preconditions:
         - The draft stage populated ``ctx.draft_result``/``ctx.plan``/
-          ``ctx.elicited_stories_text``. ``ctx.selected_title`` is also read, so a
-          gate-driven rewrite preserves the author's chosen title.
+          ``ctx.elicited_stories_text``. ``ctx.selected_title`` is also read — it is
+          produced by the planning stage's title-selection round — so a gate-driven
+          rewrite preserves the author's chosen title and the finalized publishing
+          pack reflects it.
     Postconditions:
         - Sets ``ctx.draft_result`` (final) and ``ctx.status`` (PASS or
           NEEDS_HUMAN_REVIEW). Always returns None (no early aborts).
@@ -45,6 +47,13 @@ def run_gates_stage(ctx: "PipelineContext") -> None:
           ``logger.info`` and ``ctx.status`` stays PASS — a "gates requested but not
           executable" result rather than "gates passed". Callers that require gates
           to actually run must supply a ``work_dir``.
+        - Runs no human-interaction round of its own: title selection happens once,
+          in the planning stage. When the all-gates-pass branch is taken,
+          ``publishing_pack.json`` is written with
+          ``title_options = [ctx.selected_title]`` when set, else the existing
+          ``[tc.title for tc in plan.title_candidates[:5]]`` fallback. The
+          gates-skipped branch writes no publishing pack, matching today's
+          behavior.
     Raises:
         DraftError: when gates are enabled but the guideline files required for
             gate-driven rewrites cannot be loaded, or when a rewrite iteration
@@ -85,7 +94,6 @@ def run_gates_stage(ctx: "PipelineContext") -> None:
     work_dir = ctx.work_dir
     llm_client = ctx.llm_client
     length_policy = ctx.length_policy
-    job_id = ctx.job_id
     job_updater = ctx.job_updater
     max_rewrite_iterations = ctx.max_rewrite_iterations
     run_gates = ctx.run_gates
@@ -319,21 +327,14 @@ def run_gates_stage(ctx: "PipelineContext") -> None:
                 status = "PASS"
                 logger.info("All gates PASS on rewrite iteration %s", rewrite_iter + 1)
 
-                # ── Title selection: user picks the final title ─────────
-                selected_title = _run_title_selection(
-                    plan=plan,
-                    llm_client=llm_client,
-                    job_id=job_id,
-                    job_updater=job_updater,
-                    _update=_update,
-                )
-
                 _update(
                     BlogPhase.FINALIZE,
                     sub_progress=0.5,
                     status_text="Finalizing...",
                 )
 
+                # Title selection now runs once, in the planning stage, before the
+                # draft is written; this only sources the pack from that choice.
                 title_options = (
                     [selected_title]
                     if selected_title
@@ -498,14 +499,7 @@ def run_gates_stage(ctx: "PipelineContext") -> None:
             write_artifact(work_dir, "final.md", draft_result.draft)
             logger.info("Rewrite iteration %s: applied fixes, re-running gates", rewrite_iter + 1)
     else:
-        # No gates — run title selection before finalizing
-        selected_title = _run_title_selection(
-            plan=plan,
-            llm_client=llm_client,
-            job_id=job_id,
-            job_updater=job_updater,
-            _update=_update,
-        )
+        # Gates skipped — title selection already ran in the planning stage.
         _update(
             BlogPhase.FINALIZE,
             sub_progress=1.0,

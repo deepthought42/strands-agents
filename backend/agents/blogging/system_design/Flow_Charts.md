@@ -16,11 +16,12 @@ flowchart TD
     LoadBrandSpec --> StartPipeline[Start pipeline<br/>Status: RUNNING]
 
     StartPipeline --> Research["Research Agent<br/>Persist research_packet.md<br/>(research phase sub-progress, no BlogPhase slice)"]
-    Research --> Planning["BlogWriterAgent.plan_content()<br/>ContentPlan + refine loop<br/>(bounded research_digest)<br/>(BlogPhase.PLANNING, 0-15%)"]
+    Research --> Planning["BlogWriterAgent.plan_content()<br/>ContentPlan + refine loop<br/>(bounded research_digest)<br/>(BlogPhase.PLANNING, 0-12%)"]
 
     Planning --> PlanOK{Plan<br/>acceptable?}
     PlanOK -->|No| PlanFail([FAILED<br/>PlanningError])
-    PlanOK -->|Yes| WriteDraft["Writer Agent<br/>Generate draft_v1<br/>(DRAFT_INITIAL, 15-25%)"]
+    PlanOK -->|Yes| TitleSelect["Title Selection<br/>Wait for user choice<br/>(TITLE_SELECTION, 12-15%)"]
+    TitleSelect --> WriteDraft["Writer Agent<br/>Generate draft_v1<br/>(DRAFT_INITIAL, 15-25%)"]
 
     WriteDraft --> StoryCheck{Story<br/>placeholders<br/>detected?}
     StoryCheck -->|Yes| StoryElicit["Ghost Writer Elicitation<br/>Multi-turn interviews<br/>(story_elicitation sub-phase, ~27%)"]
@@ -51,13 +52,12 @@ flowchart TD
     end
 
     Compliance --> GatesPass{All gates<br/>PASS?}
-    GatesPass -->|Yes| TitleSelect
+    GatesPass -->|Yes| Finalize["Write final.md +<br/>publishing_pack.json<br/>(FINALIZE, 96-100%)"]
     GatesPass -->|No| RewriteCheck{Rewrite<br/>iterations<br/>remaining?}
-    RewriteCheck -->|Yes| Rewrite["Rewrite from consolidated<br/>required_fixes<br/>(REWRITE_LOOP, 82-90%)"]
+    RewriteCheck -->|Yes| Rewrite["Rewrite from consolidated<br/>required_fixes<br/>(REWRITE_LOOP, 82-96%)"]
     Rewrite --> RunGates
     RewriteCheck -->|No| NeedsReview([NEEDS_HUMAN_REVIEW])
 
-    TitleSelect["Title Selection<br/>Wait for user choice<br/>(TITLE_SELECTION, 90-96%)"] --> Finalize["Write final.md +<br/>publishing_pack.json<br/>(FINALIZE, 96-100%)"]
     Finalize --> Complete([COMPLETED / PASS])
 
     style PlanFail fill:#ffcccc,stroke:#cc0000

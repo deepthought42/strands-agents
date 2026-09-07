@@ -136,7 +136,7 @@ def test_models_phase_helpers() -> None:
     )
 
     assert get_phase_progress(BlogPhase.PLANNING, 0.0) == 0
-    assert get_phase_progress(BlogPhase.PLANNING, 1.0) == 15
+    assert get_phase_progress(BlogPhase.PLANNING, 1.0) == 12
     assert get_phase_progress(BlogPhase.FINALIZE, 1.0) == 100
     assert get_phase_progress(BlogPhase.DRAFT_INITIAL, 0.5) == 22
 
@@ -144,6 +144,25 @@ def test_models_phase_helpers() -> None:
     assert "planning" in completed
     assert "draft_initial" in completed
     assert "copy_edit" not in completed
+
+
+def test_title_selection_ordered_right_after_planning() -> None:
+    """Drift guard: title selection runs at the end of the planning stage, before
+    any draft is written, so its position/range must reflect that (not the old
+    post-rewrite placement) or the UI progress bar jumps backward mid-run."""
+    from agents.blogging.shared.models import PHASE_ORDER, BlogPhase
+
+    assert PHASE_ORDER.index(BlogPhase.TITLE_SELECTION) == PHASE_ORDER.index(BlogPhase.PLANNING) + 1
+
+
+def test_phase_progress_ranges_contiguous_and_cover_0_to_100() -> None:
+    from agents.blogging.shared.models import PHASE_ORDER, PHASE_PROGRESS_RANGES
+
+    ranges = [PHASE_PROGRESS_RANGES[phase] for phase in PHASE_ORDER]
+    assert ranges[0][0] == 0
+    assert ranges[-1][1] == 100
+    for (_, prev_max), (next_min, _) in zip(ranges, ranges[1:]):
+        assert prev_max == next_min
 
 
 # ---------------------------------------------------------------------------

@@ -41,19 +41,22 @@ class PipelineContext:
           ``draft_stage_activity`` nor ``gates_stage_activity`` re-seed it
           (unlike ``elicited_stories_text``, which both do) — so today nothing
           reads this field in either execution mode.
-        - ``selected_title`` is populated by the planning stage, after outline
-          approval (``_run_title_selection``, a no-op without a configured job
-          store). The draft stage reads it and threads it into the writer/revision
-          inputs; at ``None`` (no job store, or no title chosen) the writer picks
-          its own title. The gates stage also still runs its own, independent
-          selection round today, whose result feeds only
-          ``PublishingPack.title_options`` — it does not touch the
-          already-written draft. Unlike ``plan``/``elicited_stories_text``,
-          ``selected_title`` does not yet cross the Temporal activity boundary:
+        - ``selected_title`` is populated exactly once, by the planning stage,
+          after outline approval (``_run_title_selection``, a no-op without a
+          configured job store). The draft stage reads it and threads it into the
+          writer/revision inputs; the gates stage reads the same value for its own
+          gate-driven rewrites and to build ``PublishingPack.title_options``,
+          falling back to the top plan candidates when it is ``None`` (no job
+          store, or no title chosen). Neither stage runs a selection round of its
+          own anymore. Unlike ``plan``/``elicited_stories_text``, ``selected_title``
+          does not yet cross the Temporal activity boundary:
           ``draft_stage_activity``/``gates_stage_activity`` re-seed the context
           without it, so a Temporal-mode run sees it stay at its ``None`` default
-          regardless of what the planning stage selected — only thread mode
-          carries the planning stage's choice through today.
+          regardless of what the planning stage selected — the author is still
+          prompted once during planning, but in Temporal mode that choice reaches
+          neither the draft nor the publishing pack; only thread mode carries it
+          through today. Threading it across the Temporal boundary is a tracked
+          follow-up, not yet scheduled.
         - ``draft_result`` is populated by the draft stage before the gates stage
           reads it.
     """

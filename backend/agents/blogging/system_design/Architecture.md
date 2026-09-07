@@ -117,17 +117,17 @@ Phase names and progress ranges come from `BlogPhase` and `PHASE_PROGRESS_RANGES
 
 | `BlogPhase` | Enum value | Progress | Agent(s) Involved |
 |-------------|-----------|----------|-------------------|
-| `PLANNING` | `planning` | 0–15% | `BlogWriterAgent.plan_content()` (refine loop) |
+| `PLANNING` | `planning` | 0–12% | `BlogWriterAgent.plan_content()` (refine loop) |
+| `TITLE_SELECTION` | `title_selection` | 12–15% | Human choice (via job store) |
 | `DRAFT_INITIAL` | `draft_initial` | 15–30% | Writer Agent, Ghost Writer Elicitation |
 | `DRAFT_REVIEW` | `draft_review` | 30–45% | Writer Agent (human feedback loop) |
 | `COPY_EDIT_LOOP` | `copy_edit` | 45–60% | Copy Editor Agent ↔ Writer Agent |
 | `FACT_CHECK` | `fact_check` | 60–70% | Validators + Fact Check Agent |
 | `COMPLIANCE` | `compliance` | 70–82% | Compliance Agent |
-| `REWRITE_LOOP` | `rewrite` | 82–90% | Writer Agent (gate-driven rewrites) |
-| `TITLE_SELECTION` | `title_selection` | 90–96% | Human choice (via job store) |
+| `REWRITE_LOOP` | `rewrite` | 82–96% | Writer Agent (gate-driven rewrites) |
 | `FINALIZE` | `finalize` | 96–100% | Pipeline (publishing pack generation) |
 
-**Implementation note:** `run_pipeline()` evaluates the gates inside a single loop bounded by `max_rewrite_iterations`. On each iteration it runs Validators → Fact Check → Compliance in sequence. Title selection only runs once inside the `all_pass` branch, after every gate has returned `PASS`.
+**Implementation note:** Title selection runs exactly once per run, at the end of the planning stage (`run_planning_stage`, immediately after outline approval) — before any draft exists, so the author's choice can be threaded into the writer/revision prompts. `run_pipeline()`'s gates stage separately evaluates the gates inside a single loop bounded by `max_rewrite_iterations`, running Validators → Fact Check → Compliance on each iteration; it reads the already-selected title (`ctx.selected_title`) to build `PublishingPack.title_options` and to preserve it across gate-driven rewrites, but runs no title-selection round of its own.
 
 ---
 

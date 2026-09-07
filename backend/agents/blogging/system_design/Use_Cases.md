@@ -90,7 +90,7 @@ sequenceDiagram
     API-->>UI: {job_id}
     UI->>API: GET /job/{job_id}/stream (SSE)
 
-    Note over Pipeline: Phase 1: PLANNING (0-15%)
+    Note over Pipeline: Phase 1: PLANNING (0-12%)
     API->>Pipeline: run_blog_full_pipeline_job()
     Pipeline->>RA: run(ResearchBriefInput)
     RA-->>Pipeline: ResearchAgentOutput<br/>(compiled_document, references, notes)
@@ -104,9 +104,15 @@ sequenceDiagram
     end
 
     WA-->>Pipeline: PlanningPhaseResult
-    Pipeline-->>UI: SSE {phase: planning, progress: 15}
+    Pipeline-->>UI: SSE {phase: planning, progress: 12}
 
-    Note over Pipeline: Phase 2: DRAFT_INITIAL (15-30%)
+    Note over Pipeline: Phase 2: TITLE_SELECTION (12-15%)
+    Pipeline-->>UI: SSE {waiting_for_title_selection, title_choices}
+    Author->>UI: Select preferred title
+    UI->>API: POST /job/{id}/select-title
+    Pipeline-->>UI: SSE {phase: title_selection, progress: 15}
+
+    Note over Pipeline: Phase 3: DRAFT_INITIAL (15-30%)
     Pipeline->>WA: run(WriterInput)
     WA-->>Pipeline: WriterOutput (draft_v1)
 
@@ -124,7 +130,7 @@ sequenceDiagram
 
     Pipeline-->>UI: SSE {phase: draft_initial, progress: 30}
 
-    Note over Pipeline: Phase 3: DRAFT_REVIEW (30-45%)
+    Note over Pipeline: Phase 4: DRAFT_REVIEW (30-45%)
     opt Uncertainty questions detected
         Pipeline-->>UI: SSE {waiting_for_answers, pending_questions}
         Author->>UI: Provide answers
@@ -138,7 +144,7 @@ sequenceDiagram
     Pipeline->>WA: revise_from_user_feedback()
     Pipeline-->>UI: SSE {phase: draft_review, progress: 45}
 
-    Note over Pipeline: Phase 4: COPY_EDIT (45-60%)
+    Note over Pipeline: Phase 5: COPY_EDIT (45-60%)
     loop Copy edit iterations
         Pipeline->>CE: run(CopyEditorInput)
         CE-->>Pipeline: CopyEditorOutput {feedback_items}
@@ -151,7 +157,7 @@ sequenceDiagram
     end
     Pipeline-->>UI: SSE {phase: copy_edit, progress: 60}
 
-    Note over Pipeline: Phase 5-6: FACT_CHECK + COMPLIANCE (60-82%)
+    Note over Pipeline: Phase 6-7: FACT_CHECK + COMPLIANCE (60-82%)
     Pipeline->>Val: run_validators(draft)
     Val-->>Pipeline: ValidatorReport
     Pipeline->>FC: run(draft)
@@ -162,7 +168,7 @@ sequenceDiagram
     alt All gates PASS
         Pipeline-->>UI: SSE {phase: compliance, progress: 82}
     else Any gate FAIL
-        Note over Pipeline: Phase 7: REWRITE_LOOP (82-90%)
+        Note over Pipeline: Phase 8: REWRITE_LOOP (82-96%)
         loop Max rewrite iterations
             Pipeline->>WA: revise_from_feedback(required_fixes)
             Pipeline->>Val: re-run validators
@@ -170,11 +176,6 @@ sequenceDiagram
             Pipeline->>CA: re-run compliance
         end
     end
-
-    Note over Pipeline: Phase 8: TITLE_SELECTION (90-96%)
-    Pipeline-->>UI: SSE {waiting_for_title_selection, title_choices}
-    Author->>UI: Select preferred title
-    UI->>API: POST /job/{id}/select-title
 
     Note over Pipeline: Phase 9: FINALIZE (96-100%)
     Pipeline->>Pipeline: Generate PublishingPack
@@ -208,7 +209,7 @@ sequenceDiagram
     UI->>API: POST /job/{id}/select-title {title}
     API->>JS: submit_title_selection(job_id, title)
     JS->>Pipeline: Resume with selected title
-    Pipeline->>Pipeline: Continue to FINALIZE phase
+    Pipeline->>Pipeline: Continue to DRAFT_INITIAL phase<br/>(selected title threaded into writer/revision prompts)
 ```
 
 ### 4.2 Story Elicitation (Multi-turn Interview)

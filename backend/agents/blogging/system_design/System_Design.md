@@ -333,8 +333,10 @@ stateDiagram-v2
 ```mermaid
 stateDiagram-v2
     [*] --> PLANNING
-    PLANNING --> DRAFT_INITIAL : ContentPlan accepted
+    PLANNING --> TITLE_SELECTION : Outline approved
     PLANNING --> FAILED_PLANNING : Max iterations / parse failure
+
+    TITLE_SELECTION --> DRAFT_INITIAL : Title selected (or skipped)
 
     DRAFT_INITIAL --> DRAFT_REVIEW : Draft v1 generated
     DRAFT_INITIAL --> DRAFT_REVIEW : Story placeholders filled
@@ -345,13 +347,12 @@ stateDiagram-v2
     COPY_EDIT_LOOP --> FACT_CHECK : Editor approves or loop exhausted
 
     FACT_CHECK --> COMPLIANCE : Validators + fact check complete
-    COMPLIANCE --> TITLE_SELECTION : All gates PASS
+    COMPLIANCE --> FINALIZE : All gates PASS
     COMPLIANCE --> REWRITE_LOOP : Any gate FAIL
 
     REWRITE_LOOP --> FACT_CHECK : Revised draft ready
     REWRITE_LOOP --> FINALIZE : Max rewrite iterations (NEEDS_HUMAN_REVIEW)
 
-    TITLE_SELECTION --> FINALIZE : Title selected
     FINALIZE --> [*] : Publishing pack written
 
     state DRAFT_REVIEW {
@@ -369,14 +370,14 @@ Each phase maps to a progress range from `PHASE_PROGRESS_RANGES` in `shared/mode
 
 | `BlogPhase` | Enum value | Range | Calculation |
 |-------------|-----------|-------|-------------|
-| `PLANNING` | `planning` | 0–15% | `0 + 15 * sub_progress` |
+| `PLANNING` | `planning` | 0–12% | `0 + 12 * sub_progress` |
+| `TITLE_SELECTION` | `title_selection` | 12–15% | `12 + 3 * sub_progress` |
 | `DRAFT_INITIAL` | `draft_initial` | 15–30% | `15 + 15 * sub_progress` |
 | `DRAFT_REVIEW` | `draft_review` | 30–45% | `30 + 15 * sub_progress` |
 | `COPY_EDIT_LOOP` | `copy_edit` | 45–60% | `45 + 15 * sub_progress` |
 | `FACT_CHECK` | `fact_check` | 60–70% | `60 + 10 * sub_progress` |
 | `COMPLIANCE` | `compliance` | 70–82% | `70 + 12 * sub_progress` |
-| `REWRITE_LOOP` | `rewrite` | 82–90% | `82 + 8 * sub_progress` |
-| `TITLE_SELECTION` | `title_selection` | 90–96% | `90 + 6 * sub_progress` |
+| `REWRITE_LOOP` | `rewrite` | 82–96% | `82 + 14 * sub_progress` |
 | `FINALIZE` | `finalize` | 96–100% | `96 + 4 * sub_progress` |
 
 Note that the two loop phases have shorter enum values (`copy_edit`, `rewrite`) than their enum names suggest.

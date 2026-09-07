@@ -187,6 +187,13 @@ describe('BloggingDashboardComponent (extra coverage)', () => {
     expect(component.isPhaseComplete('research')).toBe(true);
   });
 
+  it('pipelinePhases orders title_selection before draft_initial, matching the planning-stage move', () => {
+    fixture.detectChanges();
+    component.selectedJobStatus = makeStatus({ phase: 'draft_initial', status: 'running' });
+    expect(component.isPhaseComplete('title_selection')).toBe(true);
+    expect(component.isPhaseComplete('draft_initial')).toBe(false);
+  });
+
   // -----------------------------------------------------------------------
   // selectJob / streaming / polling
   // -----------------------------------------------------------------------
