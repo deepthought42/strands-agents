@@ -38,7 +38,7 @@ import concurrent.futures
 import contextlib
 import logging
 import threading
-from typing import Any, ContextManager, Dict, Optional
+from typing import Any, ContextManager, Optional
 
 from fastapi import HTTPException
 
@@ -58,7 +58,7 @@ from branding_team.shared.phase_output_cache import PhaseOutputCache
 from branding_team.store import get_default_store
 from job_service_client import JobServiceClient, start_stale_job_monitor
 from shared.app import create_team_app
-from shared.concurrency import BackgroundHeartbeat, LazySingleton
+from shared.concurrency import BackgroundHeartbeat, KeyedLazyRegistry, LazySingleton
 from shared.env_config import env_float, env_int
 
 logger = logging.getLogger(__name__)
@@ -187,8 +187,7 @@ def _get_assistant_agent() -> BrandingAssistantAgent:
 # mirroring conversation._phase_caches: process-local, never evicted (same no-TTL
 # precedent), so a REST run for a given brand can skip unchanged pipeline phases on
 # a later run within this process.
-_brand_phase_caches: Dict[str, PhaseOutputCache] = {}
-_brand_phase_caches_lock = threading.Lock()
+_brand_phase_caches: KeyedLazyRegistry[str, PhaseOutputCache] = KeyedLazyRegistry()
 
 
 def _get_brand_cache(brand_id: str) -> PhaseOutputCache:
@@ -199,20 +198,14 @@ def _get_brand_cache(brand_id: str) -> PhaseOutputCache:
         about-to-exist brand.
     Postconditions:
         Returns the same ``PhaseOutputCache`` instance for a given ``brand_id``
-        on every call within this process. Thread-safe: concurrent first calls
-        for the same new ``brand_id`` (REST run submissions execute on the
-        bounded run executor) construct exactly one ``PhaseOutputCache``, via
-        the same double-checked-locking idiom as ``_get_assistant_agent`` above
-        and ``conversation._get_or_create_phase_cache``.
+        on every call within this process. Thread-safe: first-use construction
+        is delegated to ``KeyedLazyRegistry.get_or_create``, which serializes
+        concurrent first calls for the same new ``brand_id`` (REST run
+        submissions execute on the bounded run executor) under that key's own
+        lock — a slow construction for one ``brand_id`` never delays another
+        brand's first cache.
     """
-    cache = _brand_phase_caches.get(brand_id)
-    if cache is None:
-        with _brand_phase_caches_lock:
-            cache = _brand_phase_caches.get(brand_id)
-            if cache is None:
-                cache = PhaseOutputCache()
-                _brand_phase_caches[brand_id] = cache
-    return cache
+    return _brand_phase_caches.get_or_create(brand_id, PhaseOutputCache)
 
 
 # --- Re-export the load-bearing subset (import + monkeypatch surface). Imported

@@ -225,10 +225,11 @@ with file_locks.lock(physical_lock_keys):
 ## `LazySingleton`
 
 A single-slot "build at most once, even under concurrent first access"
-primitive, consolidating the hand-rolled double-checked-locking idiom
-duplicated across `branding_team/store.py::get_default_store`,
+primitive, consolidating the hand-rolled double-checked-locking idiom that
+`branding_team/store.py::get_default_store`,
 `branding_team/api/main.py::_get_assistant_agent`, and
-`shared/coro_runner.py`'s worker-pool singleton.
+`shared/coro_runner.py`'s worker-pool singleton each used to hand-roll — all
+three are now thin wrappers over this class.
 
 ```python
 from shared.concurrency import LazySingleton
@@ -262,10 +263,11 @@ def get_default_store() -> BrandingStore:
 ## `KeyedLazyRegistry`
 
 The dict-keyed sibling of `LazySingleton`: one lazily-built value *per key*,
-consolidating the hand-rolled dict-plus-lock double-checked-locking idiom
-duplicated across `branding_team/api/conversation.py::_get_or_create_phase_cache`,
-`branding_team/api/main.py::_get_brand_cache`, and
-`llm_service/rate_limiter.py::_get_team_semaphore`.
+consolidating the hand-rolled dict-plus-lock double-checked-locking idiom. Two
+call sites — `branding_team/api/conversation.py::_get_or_create_phase_cache`
+and `branding_team/api/main.py::_get_brand_cache` — are already thin wrappers
+over it; `llm_service/rate_limiter.py::_get_team_semaphore` still hand-rolls
+its own copy of the same idiom.
 
 ```python
 from shared.concurrency import KeyedLazyRegistry
@@ -307,6 +309,14 @@ class TeamSemaphorePool:
 - `None` is the per-key "not built yet" sentinel, so `factory` must never return
   `None` — the same rule, and the same `ValueError`, as `LazySingleton`. The
   error message names the offending key.
+- `key in registry` and `registry[key]` are lock-free reads of an
+  already-built slot — neither invokes `factory` or blocks on a key's lock.
+  `in` answers "has some call's `factory` already completed for this key?";
+  once `True`, it's permanent, since values are never evicted. `registry[key]`
+  returns that exact same object, or raises `KeyError` if the key isn't built
+  yet (never `None` — `None` is never a stored value). Use these only to check
+  or read a key you expect is already populated; to get-or-build, call
+  `get_or_create`.
 - Re-entrancy is rejected loudly rather than hanging: a `factory` that calls
   `get_or_create` for the key it is building raises `RuntimeError`, and so does
   one that reaches for a key this registry saw *earlier and that is not yet

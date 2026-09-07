@@ -20,9 +20,8 @@ from __future__ import annotations
 
 import logging
 import os
-import threading
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 from fastapi import HTTPException
 
@@ -37,6 +36,7 @@ from branding_team.assistant.store import _default_mission, _StoredMessage
 from branding_team.models import Brand, BrandingMission, HumanReview, TeamOutput
 from branding_team.shared.phase_output_cache import PhaseOutputCache
 from branding_team.store import AttachConversationResult
+from shared.concurrency import KeyedLazyRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -51,8 +51,7 @@ logger = logging.getLogger(__name__)
 # never evicted -- conversations already live forever in their Postgres table
 # with no TTL/cleanup precedent anywhere in this codebase, so an unbounded
 # registry matches that existing tradeoff rather than introducing a new one.
-_phase_caches: Dict[str, PhaseOutputCache] = {}
-_phase_caches_lock = threading.Lock()
+_phase_caches: KeyedLazyRegistry[str, PhaseOutputCache] = KeyedLazyRegistry()
 
 
 def _get_or_create_phase_cache(conversation_id: str) -> PhaseOutputCache:
@@ -68,20 +67,14 @@ def _get_or_create_phase_cache(conversation_id: str) -> PhaseOutputCache:
         made to the returned cache (e.g. via ``PhaseOutputCache.put``) are
         visible to every later call with the same ``conversation_id``. Never
         persisted to Postgres or across process restarts. Thread-safe:
-        concurrent first calls for the same new ``conversation_id`` (the chat
-        endpoints run on a bounded pipeline executor threadpool) construct
-        exactly one ``PhaseOutputCache``, via the same double-checked-locking
-        idiom used by ``main._get_assistant_agent`` and
-        ``store.get_default_store``.
+        first-use construction is delegated to
+        ``KeyedLazyRegistry.get_or_create``, which serializes concurrent first
+        calls for the same new ``conversation_id`` (the chat endpoints run on a
+        bounded pipeline executor threadpool) under that key's own lock -- a
+        slow construction for one conversation never delays another
+        conversation's first cache.
     """
-    cache = _phase_caches.get(conversation_id)
-    if cache is None:
-        with _phase_caches_lock:
-            cache = _phase_caches.get(conversation_id)
-            if cache is None:
-                cache = PhaseOutputCache()
-                _phase_caches[conversation_id] = cache
-    return cache
+    return _phase_caches.get_or_create(conversation_id, PhaseOutputCache)
 
 
 def _run_orchestrator_if_ready(

@@ -213,3 +213,37 @@ def test_supports_any_hashable_key_type() -> None:
     # Distinct key types don't collide, and each still returns its own value.
     assert registry.get_or_create(7, lambda: "unused") == "int"
     assert registry.get_or_create(("brand", 1), lambda: "unused") == "tuple"
+
+
+def test_contains_is_false_before_build_and_true_after() -> None:
+    registry: KeyedLazyRegistry[str, object] = KeyedLazyRegistry()
+
+    assert "k" not in registry
+    registry.get_or_create("k", object)
+    assert "k" in registry
+
+
+def test_getitem_returns_the_identical_object_get_or_create_built() -> None:
+    registry: KeyedLazyRegistry[str, object] = KeyedLazyRegistry()
+    built = registry.get_or_create("k", object)
+
+    assert registry["k"] is built
+
+
+def test_getitem_raises_key_error_for_an_unbuilt_key() -> None:
+    registry: KeyedLazyRegistry[str, object] = KeyedLazyRegistry()
+
+    with pytest.raises(KeyError):
+        registry["never-built"]
+
+
+def test_contains_and_getitem_never_invoke_a_factory() -> None:
+    registry: KeyedLazyRegistry[str, str] = KeyedLazyRegistry()
+
+    assert "k" not in registry
+    with pytest.raises(KeyError):
+        registry["k"]
+
+    registry.get_or_create("k", lambda: "built")
+    assert "k" in registry
+    assert registry["k"] == "built"

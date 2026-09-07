@@ -2,17 +2,18 @@
 
 :class:`KeyedLazyRegistry` consolidates the hand-rolled "value = registry.get(key);
 if value is None: with lock: value = registry.get(key); if value is None:
-registry[key] = build()" idiom duplicated across
-``branding_team/api/conversation.py::_get_or_create_phase_cache``,
-``branding_team/api/main.py::_get_brand_cache``, and
-``llm_service/rate_limiter.py::_get_team_semaphore`` (see
-``shared/concurrency/README.md`` for the full list of call sites this is intended
-to replace). It is the dict-keyed sibling of
+registry[key] = build()" idiom that
+``branding_team/api/conversation.py::_get_or_create_phase_cache`` and
+``branding_team/api/main.py::_get_brand_cache`` used to hand-roll — both are now
+thin wrappers over this class, shown as the :meth:`~KeyedLazyRegistry.get_or_create`
+usage example below. ``llm_service/rate_limiter.py::_get_team_semaphore`` still
+hand-rolls its own copy of the same idiom (see ``shared/concurrency/README.md``
+for the full picture). This class is the dict-keyed sibling of
 :class:`~shared.concurrency.lazy_singleton.LazySingleton`, and shares that class's
 factory contract verbatim so the two primitives can be reasoned about together.
 
-Unlike those call sites, which serialize every key's construction through one
-shared lock, this registry delegates mutual exclusion to
+Unlike a shared-lock call site, which serializes every key's construction
+through one lock, this registry delegates mutual exclusion to
 :class:`~shared.concurrency.keyed_lock_manager.KeyedLockManager`: a slow factory
 for one key never delays first construction for another. It is stdlib-only apart
 from that sibling primitive.
@@ -41,7 +42,9 @@ class KeyedLazyRegistry(Generic[K, _T]):
     general-purpose cache. A registry that needs eviction wants a bounded/LRU
     structure instead, not this primitive.
 
-    Usage::
+    Usage (the first example is the real
+    ``branding_team/api/conversation.py::_get_or_create_phase_cache`` call site;
+    the second is illustrative for a closure-style factory)::
 
         _phase_caches: KeyedLazyRegistry[str, PhaseOutputCache] = KeyedLazyRegistry()
 
@@ -140,9 +143,9 @@ class KeyedLazyRegistry(Generic[K, _T]):
           than holding a single lock across construction.
         - No value is ever evicted or replaced once stored, so a key's value is
           stable for this instance's lifetime and memory grows with the number of
-          distinct keys ever seen — the same unbounded-registry tradeoff the
-          existing call sites already document, and the same one the underlying
-          manager makes for its per-key locks.
+          distinct keys ever seen — the same unbounded-registry tradeoff the two
+          migrated call sites' comments already document, and the same one the
+          underlying manager makes for its per-key locks.
         - Each key's slot is single-assignment: written only by the thread
           holding that key's lock, only after ``factory`` returned a non-``None``
           value, and never overwritten or removed. That, not merely dict
@@ -156,8 +159,11 @@ class KeyedLazyRegistry(Generic[K, _T]):
           and re-checks the slot under the key's lock *before* deciding to
           build, so a stale fast-path miss costs one uncontended lock
           acquisition and can never cause a second construction. This is the
-          same assumption the three hand-rolled call sites this replaces already
-          rely on.
+          same assumption the hand-rolled code the two migrated call sites used
+          to have relied on. :meth:`__contains__` and :meth:`__getitem__` are lock-free
+          reads over the same slot and lean on this same guarantee: once either
+          observes a key present, that observation is permanent and the value
+          returned is that key's one final object, never a partial one.
     """
 
     def __init__(self) -> None:
@@ -213,3 +219,38 @@ class KeyedLazyRegistry(Generic[K, _T]):
                         )
                     self._values[key] = value
         return value
+
+    def __contains__(self, key: object) -> bool:
+        """Whether ``key`` already has a built value.
+
+        Preconditions:
+            None beyond ``key`` being a hashable object — it need not be a
+            ``K`` this registry has ever seen.
+        Postconditions:
+            Returns ``True`` iff some call's ``factory`` has already completed
+            for ``key``. This is a point-in-time snapshot, but per the class
+            Invariants a ``True`` result is permanent: this instance never
+            evicts, so a later :meth:`__getitem__` for the same ``key`` always
+            succeeds and returns that identical value. A ``False`` result means
+            only "not built *yet*" — another thread may be constructing it
+            right now, or no one has asked for it at all — never "never will
+            be." Does not invoke any ``factory`` and never blocks on a key's
+            lock.
+        """
+        return key in self._values
+
+    def __getitem__(self, key: K) -> _T:
+        """Return ``key``'s already-built value without constructing it.
+
+        Preconditions:
+            ``key in self`` — this is a read of an existing slot, not a
+            build-or-read like :meth:`get_or_create`.
+        Postconditions:
+            Returns the exact object some call's ``factory`` built for ``key``,
+            identical to what every :meth:`get_or_create` call for that key
+            returns. Raises ``KeyError`` if ``key`` has no value yet — never
+            ``None``, since ``self._values`` only ever holds fully-constructed,
+            non-``None`` values (see class Preconditions on ``factory``). Does
+            not invoke any ``factory`` and never blocks on a key's lock.
+        """
+        return self._values[key]
