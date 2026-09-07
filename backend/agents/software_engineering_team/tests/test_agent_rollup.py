@@ -7,6 +7,7 @@ and the pure grouping/percentile computation in ``compute_from_traces``.
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import pytest
@@ -14,8 +15,10 @@ import pytest
 from software_engineering_team.metrics.agent_rollup import (
     AgentRollupMetrics,
     CallRollup,
+    compute_agent_rollup,
     compute_from_traces,
 )
+from software_engineering_team.shared import trace_store
 
 
 def test_call_rollup_defaults() -> None:
@@ -408,3 +411,100 @@ def test_expected_keys_default_and_empty_iterable_match_sparse_behavior() -> Non
     assert default_result.by_phase.keys() == explicit_empty.by_phase.keys()
     assert default_result.by_agent_phase.keys() == explicit_empty.by_agent_phase.keys()
     assert "frontend" not in default_result.by_agent
+
+
+# --- compute_agent_rollup (the Postgres-reading wrapper) -----------------------
+#
+# These monkeypatch trace_store.fetch_traces_since with a spy rather than a fake
+# cursor: fetch_traces_since's own SQL is covered by test_observability_stores.py,
+# so these tests assert only what the wrapper itself is responsible for —
+# deriving the window, forwarding job_id/expected keys, and delegating the math
+# to compute_from_traces without adding any of its own.
+
+
+def test_compute_agent_rollup_rejects_non_positive_window(monkeypatch) -> None:
+    """window_days <= 0 raises before the store is ever called."""
+    calls: list[Any] = []
+    monkeypatch.setattr(
+        trace_store, "fetch_traces_since", lambda *a, **kw: calls.append((a, kw)) or []
+    )
+
+    with pytest.raises(ValueError):
+        compute_agent_rollup(0.0)
+
+    assert calls == []
+
+
+def test_compute_agent_rollup_derives_cutoff_from_window(monkeypatch) -> None:
+    """The wrapper calls the store with cutoff = now - window_days, within tolerance."""
+    captured: dict[str, Any] = {}
+
+    def _spy(cutoff, *, job_id=None):
+        captured["cutoff"] = cutoff
+        captured["job_id"] = job_id
+        return []
+
+    monkeypatch.setattr(trace_store, "fetch_traces_since", _spy)
+
+    before = datetime.now(tz=timezone.utc)
+    compute_agent_rollup(7.0)
+    after = datetime.now(tz=timezone.utc)
+
+    assert before - timedelta(days=7) <= captured["cutoff"] <= after - timedelta(days=7)
+    assert captured["job_id"] is None
+
+
+def test_compute_agent_rollup_forwards_job_id(monkeypatch) -> None:
+    """job_id — including "" — reaches the store as the keyword it was given."""
+    captured: dict[str, Any] = {}
+
+    def _spy(cutoff, *, job_id=None):
+        captured["job_id"] = job_id
+        return []
+
+    monkeypatch.setattr(trace_store, "fetch_traces_since", _spy)
+
+    compute_agent_rollup(1.0, job_id="j1")
+    assert captured["job_id"] == "j1"
+
+    compute_agent_rollup(1.0, job_id="")
+    assert captured["job_id"] == ""
+
+
+def test_compute_agent_rollup_delegates_math_to_compute_from_traces(monkeypatch) -> None:
+    """Rows from the store produce the same result as calling compute_from_traces directly."""
+    rows = [
+        _row(agent_key="backend", phase="execution", cost_usd=1.0, input_tokens=10, latency_ms=100),
+        _row(agent_key="frontend", phase="design", cost_usd=2.0, input_tokens=20, latency_ms=200),
+    ]
+    monkeypatch.setattr(trace_store, "fetch_traces_since", lambda *a, **kw: rows)
+
+    wrapped = compute_agent_rollup(7.0).to_dict()
+    direct = compute_from_traces(rows, window_days=7.0).to_dict()
+    del wrapped["computed_at"]
+    del direct["computed_at"]
+
+    assert wrapped == direct
+
+
+def test_compute_agent_rollup_empty_result_set_is_well_formed(monkeypatch) -> None:
+    """An empty store read returns a well-formed AgentRollupMetrics, never a raise."""
+    monkeypatch.setattr(trace_store, "fetch_traces_since", lambda *a, **kw: [])
+
+    m = compute_agent_rollup(7.0)
+
+    assert m.window_days == 7.0
+    assert m.by_agent == {}
+    assert m.by_phase == {}
+    assert m.by_agent_phase == {}
+
+
+def test_compute_agent_rollup_forwards_expected_keys(monkeypatch) -> None:
+    """expected_agent_keys/expected_phases reach compute_from_traces, producing the zero-call grid."""
+    monkeypatch.setattr(trace_store, "fetch_traces_since", lambda *a, **kw: [])
+
+    m = compute_agent_rollup(7.0, expected_agent_keys=["backend"], expected_phases=["execution"])
+
+    assert m.by_agent["backend"] == CallRollup()
+    assert m.by_phase["execution"] == CallRollup()
+    assert m.by_agent_phase["backend"]["execution"] == CallRollup()

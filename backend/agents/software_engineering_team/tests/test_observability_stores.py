@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
 from software_engineering_team.shared import learnings_store, se_events, trace_store
 
-from ._observability_test_doubles import _FIELDS
+from ._observability_test_doubles import _FIELDS, _FakeCursor, install_fake_cursor
 from ._observability_test_doubles import TraceCallRecord as _Rec
 
 # --- se_events -------------------------------------------------------------
@@ -206,6 +205,126 @@ def test_fetch_cost_empty_without_postgres() -> None:
     assert out == {"total_cost_usd": 0.0, "by_job": {}}
 
 
+# --- trace_store.fetch_traces_since (rollup's read path, no live Postgres) -----
+
+
+def test_fetch_traces_since_naive_cutoff_rejected() -> None:
+    """A naive cutoff raises before any DB work — a silently shifted window is a caller bug."""
+    with pytest.raises(ValueError):
+        trace_store.fetch_traces_since(datetime.now())
+
+
+def test_fetch_traces_empty_without_postgres() -> None:
+    """fetch_traces_since returns [] when Postgres is unconfigured."""
+    assert trace_store.fetch_traces_since(datetime.now(tz=timezone.utc)) == []
+
+
+def test_fetch_traces_since_noop_attempts_no_connection(monkeypatch) -> None:
+    """Without POSTGRES_HOST, fetch_traces_since never reaches get_conn.
+
+    Same "gate actually short-circuited, not just swallowed" proof as
+    test_prune_traces_noop above: a return-value-only assertion can't tell the
+    two apart.
+    """
+    monkeypatch.delenv("POSTGRES_HOST", raising=False)
+
+    from shared.postgres import client as pg_client
+
+    connection_attempts = []
+
+    def _record_and_fail(*args, **kwargs):
+        connection_attempts.append((args, kwargs))
+        raise RuntimeError("fetch_traces_since must not reach get_conn without POSTGRES_HOST")
+
+    monkeypatch.setattr(pg_client, "get_conn", _record_and_fail)
+
+    assert trace_store.fetch_traces_since(datetime.now(tz=timezone.utc)) == []
+    assert connection_attempts == [], (
+        "fetch_traces_since attempted a DB connection without POSTGRES_HOST"
+    )
+
+
+def test_fetch_traces_since_selects_only_rollup_columns(_fake_cursor) -> None:
+    """The SELECT names exactly the rollup's columns — never a wide SELECT *."""
+    cursor = _fake_cursor(rows=[])
+
+    trace_store.fetch_traces_since(datetime.now(tz=timezone.utc))
+
+    sql, _ = cursor.executed[0]
+    assert "select *" not in sql.lower()
+    for column in trace_store._ROLLUP_COLUMNS:
+        assert column in sql
+
+
+def test_fetch_traces_since_filters_on_window(_fake_cursor) -> None:
+    """With no job_id, the SQL binds only the cutoff and carries no job_id predicate."""
+    cursor = _fake_cursor(rows=[])
+    cutoff = datetime.now(tz=timezone.utc) - timedelta(days=7)
+
+    trace_store.fetch_traces_since(cutoff)
+
+    sql, params = cursor.executed[0]
+    assert "ts >= %s" in sql
+    assert "job_id" not in sql
+    assert params == (cutoff,)
+
+
+def test_fetch_traces_since_filters_on_job_id(_fake_cursor) -> None:
+    """A job_id filter appends AND job_id = %s, bound after the cutoff."""
+    cursor = _fake_cursor(rows=[])
+    cutoff = datetime.now(tz=timezone.utc)
+
+    trace_store.fetch_traces_since(cutoff, job_id="j1")
+
+    sql, params = cursor.executed[0]
+    assert "ts >= %s" in sql
+    assert "job_id = %s" in sql
+    assert params == (cutoff, "j1")
+
+
+def test_fetch_traces_since_empty_job_id_is_a_real_filter(_fake_cursor) -> None:
+    """job_id="" filters on the empty-string job — it is not a "no filter" sentinel."""
+    cursor = _fake_cursor(rows=[])
+    cutoff = datetime.now(tz=timezone.utc)
+
+    trace_store.fetch_traces_since(cutoff, job_id="")
+
+    sql, params = cursor.executed[0]
+    assert "job_id = %s" in sql
+    assert params == (cutoff, "")
+
+
+def test_fetch_traces_since_returns_empty_result_set(_fake_cursor) -> None:
+    """An empty result set returns [] — not a raise, not a synthesized row."""
+    _fake_cursor(rows=[])
+    assert trace_store.fetch_traces_since(datetime.now(tz=timezone.utc)) == []
+
+
+def test_fetch_traces_since_returns_queued_rows_unmodified(_fake_cursor) -> None:
+    """Rows come back exactly as the cursor yields them — no reshaping in the store."""
+    row = {
+        "agent_key": "backend",
+        "phase": "execution",
+        "cost_usd": 1.5,
+        "input_tokens": 100,
+        "output_tokens": 50,
+        "cache_read_tokens": 10,
+        "cache_creation_tokens": 5,
+        "latency_ms": 250,
+    }
+    _fake_cursor(rows=[row])
+
+    rows = trace_store.fetch_traces_since(datetime.now(tz=timezone.utc))
+
+    assert rows == [row]
+
+
+def test_fetch_traces_since_never_raises_on_cursor_failure(_fake_cursor) -> None:
+    """A cursor failure degrades to [] rather than propagating."""
+    _fake_cursor(raise_on_execute=True)
+    assert trace_store.fetch_traces_since(datetime.now(tz=timezone.utc)) == []
+
+
 def test_trace_observer_ignores_non_se(monkeypatch) -> None:
     """The trace observer does not enqueue traces for non-SE teams."""
     from software_engineering_team.shared import trace_flusher
@@ -295,116 +414,9 @@ def test_prune_traces_noop(monkeypatch) -> None:
 # --- trace_store cache-token persistence (single-row + batch, no live Postgres) --------
 
 
-class _FakeCursorContractViolation(BaseException):
-    """Raised when a statement/row pair would be rejected by real psycopg.
-
-    Deliberately derives from ``BaseException``, not ``Exception``: both write
-    paths wrap their cursor work in ``except Exception`` (DEBUG log, no raise),
-    so an ``Exception`` raised by the fake would be swallowed by the code under
-    test and resurface as an opaque ``IndexError`` on ``cursor.executed[0]``.
-    Deriving from ``BaseException`` lets the violation propagate to pytest with
-    its own message intact.
-    """
-
-
-class _FakeCursor:
-    """Records every execute/executemany call; no live Postgres involved.
-
-    Mirrors psycopg's arity check: a statement whose ``%s`` count does not match
-    the row width is a hard error, not a silently-recorded call. Without this the
-    fake would happily accept a row that real psycopg rejects, and since both
-    write paths swallow exceptions (DEBUG log, no raise) the drift would surface
-    only as silently-dropped trace rows in production.
-
-    Prior art: ``llm_service/tests/test_usage_store.py`` carries a near-identical
-    recording cursor + ``pg_cursor``-patching fixture. The shared scaffold in
-    ``shared.postgres.fake`` does not cover this need — it is dispatch-table
-    style, patches ``get_conn`` rather than ``pg_cursor``, and offers neither
-    call recording nor raise injection — which is why both suites hand-roll a
-    spy. The two copies have already drifted (that one supports ``fetchone``/
-    ``fetchall``, this one adds the arity check above) — the next one to touch
-    either should converge them rather than let a third copy appear, into
-    either ``shared.postgres.testing`` (alongside the re-exported fake scaffold)
-    or an agents-pythonpath module following the ``llm_client_fakes.py``
-    precedent, whichever keeps cross-team imports out of another team's
-    private ``tests/`` package.
-    """
-
-    def __init__(self, raise_on_execute: bool = False) -> None:
-        """Construct an empty recording cursor.
-
-        Preconditions:
-            None.
-        Postconditions:
-            ``self.executed`` is an empty list. ``self._raise`` is
-            ``raise_on_execute`` — when true, every subsequent ``execute``/
-            ``executemany`` call raises ``RuntimeError`` instead of recording.
-        """
-        self.executed: list[tuple] = []
-        self._raise = raise_on_execute
-
-    @staticmethod
-    def _check_arity(sql: str, params, expected: int) -> None:
-        """Reject a ``params``/row whose length does not match ``sql``'s own ``%s`` count.
-
-        Preconditions:
-            ``expected`` is ``sql.count("%s")``, computed once by the caller — passed
-            in rather than recomputed here so a caller iterating many rows against
-            the same ``sql`` (``executemany``) does the ``str.count`` scan once.
-        Postconditions:
-            Returns ``None`` when ``len(params or ())`` equals ``expected``.
-        Raises:
-            ``_FakeCursorContractViolation`` — deliberately a ``BaseException``, not an
-            ``Exception`` — when the lengths differ, naming both counts.
-        """
-        actual = len(params or ())
-        if expected != actual:
-            raise _FakeCursorContractViolation(f"SQL expects {expected} params, row has {actual}")
-
-    def execute(self, sql: str, params=None) -> None:
-        """Record one ``(sql, params)`` call, or raise if ``raise_on_execute`` is set.
-
-        Preconditions:
-            ``params`` is ``None`` or a sequence whose length matches ``sql``'s ``%s``
-            placeholder count.
-        Postconditions:
-            When not configured to raise, appends ``(sql, params)`` to ``self.executed``
-            and returns ``None``.
-        Raises:
-            ``RuntimeError`` when ``raise_on_execute`` was set at construction, before
-            any arity check or recording. ``_FakeCursorContractViolation`` when
-            ``params``'s length does not match ``sql``'s placeholder count.
-        """
-        if self._raise:
-            raise RuntimeError("boom")
-        self._check_arity(sql, params, sql.count("%s"))
-        self.executed.append((sql, params))
-
-    def executemany(self, sql: str, seq) -> None:
-        """Record one ``(sql, rows)`` call for a batch, or raise if ``raise_on_execute`` is set.
-
-        Preconditions:
-            Every row in ``seq`` is a sequence whose length matches ``sql``'s ``%s``
-            placeholder count.
-        Postconditions:
-            When not configured to raise, appends ``(sql, list(seq))`` to
-            ``self.executed`` and returns ``None``. ``sql.count("%s")`` is computed
-            once and reused across every row in ``seq``, since it is invariant for a
-            single call.
-        Raises:
-            ``RuntimeError`` when ``raise_on_execute`` was set at construction, before
-            any row is checked or recorded. ``_FakeCursorContractViolation`` on the
-            first row whose length does not match ``sql``'s placeholder count.
-        """
-        if self._raise:
-            raise RuntimeError("boom")
-        expected = sql.count("%s")
-        rows = list(seq)
-        for row in rows:
-            self._check_arity(sql, row, expected)
-        self.executed.append((sql, rows))
-
-
+# _FakeCursor / _FakeCursorContractViolation now live in
+# _observability_test_doubles.py (shared with the rollup wrapper's SQL tests);
+# this file uses them via install_fake_cursor.
 @pytest.fixture
 def _fake_cursor(monkeypatch):
     """Enable tracing and swap trace_store.pg_cursor for a recording FakeCursor.
@@ -413,45 +425,18 @@ def _fake_cursor(monkeypatch):
         ``monkeypatch`` is the pytest fixture — the substitution it installs is
         undone automatically at test teardown.
     Postconditions:
-        ``SE_TRACE_TO_POSTGRES`` is set for the duration of the test, and
-        ``trace_store.pg_cursor`` is replaced. Returns a factory: call it with no
-        args for the default (non-raising) cursor, or ``raise_on_execute=True``
-        for a cursor that raises on ``execute``/``executemany`` instead of
-        recording (for the never-raise-on-DB-failure path). Each call to the
-        factory installs a fresh cursor and re-patches ``pg_cursor`` to yield it.
+        ``SE_TRACE_TO_POSTGRES`` is set for the duration of the test (the write
+        path's own gate; the read path does not consult it). Returns a factory —
+        see :func:`_observability_test_doubles.install_fake_cursor` for the
+        ``raise_on_execute``/``rows`` arguments it forwards. Each call installs a
+        fresh cursor and re-patches ``trace_store.pg_cursor`` to yield it.
     """
     monkeypatch.setenv("SE_TRACE_TO_POSTGRES", "true")
 
-    def _make(raise_on_execute: bool = False) -> _FakeCursor:
-        """Install a fresh ``_FakeCursor`` as ``trace_store.pg_cursor`` and return it.
-
-        Preconditions:
-            None beyond the enclosing fixture's.
-        Postconditions:
-            ``trace_store.pg_cursor`` is patched to a context manager matching the
-            real ``pg_cursor(*, dict_rows=False, database=None)`` signature that
-            yields the returned cursor. Calling it again replaces the patch with a
-            new cursor — the two do not share call history.
-        """
-        cursor = _FakeCursor(raise_on_execute)
-
-        @contextmanager
-        def _pg_cursor(*, dict_rows: bool = False, database=None):
-            """Stand-in for ``shared.postgres.pg_cursor``; yields the fake cursor.
-
-            Preconditions:
-                Signature must track the real ``pg_cursor`` — a keyword-only
-                ``dict_rows`` and ``database``, both with matching defaults — so
-                this fake stays a valid substitute if the real one's callers change
-                how they invoke it.
-            Postconditions:
-                Yields ``cursor`` unconditionally; both parameters are accepted but
-                unused, since the fake never distinguishes row-factory mode.
-            """
-            yield cursor
-
-        monkeypatch.setattr(trace_store, "pg_cursor", _pg_cursor)
-        return cursor
+    def _make(raise_on_execute: bool = False, rows=None) -> _FakeCursor:
+        return install_fake_cursor(
+            monkeypatch, trace_store, raise_on_execute=raise_on_execute, rows=rows
+        )
 
     return _make
 

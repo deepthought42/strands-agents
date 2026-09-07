@@ -98,7 +98,9 @@ def test_record_event_explicit_trace_id_overrides_context(_schema) -> None:
     from software_engineering_team.shared import se_events
 
     with bind_trace_id("context-trace"):
-        assert se_events.record_event(se_events.MERGE_TO_MAIN, job_id="jT", trace_id="explicit-trace")
+        assert se_events.record_event(
+            se_events.MERGE_TO_MAIN, job_id="jT", trace_id="explicit-trace"
+        )
 
     rows = se_events.fetch_events_since(datetime.now(tz=timezone.utc) - timedelta(days=1))
     assert rows[0]["trace_id"] == "explicit-trace"
@@ -356,3 +358,62 @@ def test_prune_traces_zero_retention_is_noop(_schema, monkeypatch) -> None:
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("SELECT COUNT(*) FROM se_agent_traces WHERE job_id = %s", ("jAncient",))
         assert cur.fetchone()[0] == 1
+
+
+def test_compute_agent_rollup_groups_written_traces(_schema, monkeypatch) -> None:
+    """The end-to-end read path: written traces round-trip through compute_agent_rollup,
+    grouped by agent_key/phase, with a job_id filter narrowing to one job's rows.
+
+    Exercises the actual column names on both sides of the wire (schema, insert,
+    select) — the fake-cursor unit tests can't catch a drift there, since the fake
+    never validates against a real schema.
+    """
+    monkeypatch.setenv("SE_TRACE_TO_POSTGRES", "true")
+    from software_engineering_team.metrics.agent_rollup import compute_agent_rollup
+    from software_engineering_team.shared import trace_store
+
+    assert (
+        trace_store.write_trace(
+            _Rec(
+                job_id="jRollup1",
+                agent_key="backend",
+                phase="execution",
+                cost_usd=1.0,
+                prompt_tokens=100,
+                completion_tokens=50,
+                cache_read_tokens=20,
+                latency_ms=150,
+                request_id="rr1",
+            )
+        )
+        is True
+    )
+    assert (
+        trace_store.write_trace(
+            _Rec(
+                job_id="jRollup2",
+                agent_key="frontend",
+                phase="design",
+                cost_usd=2.0,
+                prompt_tokens=200,
+                completion_tokens=80,
+                cache_creation_tokens=40,
+                latency_ms=300,
+                request_id="rr2",
+            )
+        )
+        is True
+    )
+
+    m = compute_agent_rollup(1.0)
+    assert m.by_agent["backend"].call_count == 1
+    assert m.by_agent["frontend"].call_count == 1
+    assert m.by_phase["execution"].call_count == 1
+    assert m.by_phase["design"].call_count == 1
+    assert m.by_agent_phase["backend"]["execution"].total_cost_usd == pytest.approx(1.0)
+
+    narrowed = compute_agent_rollup(1.0, job_id="jRollup1")
+    assert narrowed.by_agent["backend"].call_count == 1
+    assert "frontend" not in narrowed.by_agent
+    assert narrowed.by_phase["execution"].call_count == 1
+    assert "design" not in narrowed.by_phase

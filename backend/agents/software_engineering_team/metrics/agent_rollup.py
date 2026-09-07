@@ -1,10 +1,14 @@
-"""Result shape for the per-``agent_key``/per-``phase`` cost, token, and latency rollup.
+"""Per-``agent_key``/per-``phase`` cost, token, and latency rollup over ``se_agent_traces``.
 
 Defines the data shape the rollup computation fills in and that consumers
 (model-tiering, cache-breakpoint adoption work) will read. Grouping over
 ``se_agent_traces`` rows is done by the pure :func:`compute_from_traces`, mirroring how
 :mod:`dora` keeps its ``DoraMetrics`` dataclass and pure ``compute_from_events`` in one
-module.
+module. :func:`compute_agent_rollup` is the thin wrapper that reads rows from
+Postgres (via :mod:`software_engineering_team.shared.trace_store`) and hands them to
+:func:`compute_from_traces` — mirroring how :func:`dora.compute_dora` wires
+:func:`dora.compute_from_events` to the store layer. The wrapper holds no arithmetic
+of its own: every metric is computed by the pure function.
 
 **Grouping keys** — three views are reported, not a subset:
 
@@ -86,7 +90,7 @@ import math
 from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from software_engineering_team.metrics._stats import median as _median
@@ -307,4 +311,52 @@ def compute_from_traces(
     return metrics
 
 
-__all__ = ["CallRollup", "AgentRollupMetrics", "compute_from_traces"]
+def compute_agent_rollup(
+    window_days: float,
+    *,
+    job_id: Optional[str] = None,
+    expected_agent_keys: Optional[Iterable[str]] = None,
+    expected_phases: Optional[Iterable[str]] = None,
+) -> AgentRollupMetrics:
+    """Compute the per-``agent_key``/per-``phase`` rollup over the last ``window_days`` from Postgres.
+
+    The thin wrapper: it derives the query window, delegates the read to
+    :func:`software_engineering_team.shared.trace_store.fetch_traces_since`, and hands
+    the rows to :func:`compute_from_traces` — mirroring :func:`dora.compute_dora`.
+    It contains no metric arithmetic; deriving ``cutoff`` from ``window_days`` is
+    window scoping, not computation, and every field on the returned
+    :class:`AgentRollupMetrics` is produced by :func:`compute_from_traces`.
+
+    Preconditions:
+        - ``window_days > 0``.
+        - ``job_id``, if given, is matched by exact equality against
+          ``se_agent_traces.job_id`` (``""`` is a real, queryable value, not a
+          "no filter" sentinel) — see :func:`trace_store.fetch_traces_since`.
+        - ``expected_agent_keys``/``expected_phases`` follow
+          :func:`compute_from_traces`'s own preconditions; they are forwarded
+          unchanged.
+    Postconditions:
+        - Raises ``ValueError`` if ``window_days <= 0``, before any query is made.
+        - Otherwise returns an :class:`AgentRollupMetrics` computed by
+          :func:`compute_from_traces` over the rows
+          :func:`trace_store.fetch_traces_since` returns for
+          ``cutoff = now - window_days`` (and, when given, ``job_id``) — a
+          well-formed, all-zero/empty result (or the declared zero-call grid, if
+          expected keys were passed) when Postgres is disabled or the read fails,
+          never a raise, matching this team's other Postgres-backed reads.
+    """
+    if window_days <= 0:
+        raise ValueError("window_days must be > 0")
+    from software_engineering_team.shared import trace_store
+
+    cutoff = datetime.now(tz=timezone.utc) - timedelta(days=window_days)
+    rows = trace_store.fetch_traces_since(cutoff, job_id=job_id)
+    return compute_from_traces(
+        rows,
+        window_days,
+        expected_agent_keys=expected_agent_keys,
+        expected_phases=expected_phases,
+    )
+
+
+__all__ = ["CallRollup", "AgentRollupMetrics", "compute_from_traces", "compute_agent_rollup"]

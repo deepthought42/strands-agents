@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Any, Sequence
+from typing import Any, Optional, Sequence
 
 from shared.postgres import pg_cursor
 from software_engineering_team.shared.env_config import env_bool, env_float
@@ -28,6 +28,25 @@ _INSERT_SQL = (
     "input_tokens, output_tokens, total_tokens, cache_read_tokens, cache_creation_tokens, "
     "cost_usd, latency_ms, status, outcome, objective, request_id) VALUES "
     "(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+)
+
+# The exact column set the agent/phase rollup's pure computation reads (see
+# metrics.agent_rollup._rollup_for_group) — deliberately not ``SELECT *``.
+# se_agent_traces carries 19 columns; the rollup query reads only these eight.
+# ``ts`` and ``job_id`` are the two other columns fetch_traces_since touches, but
+# only in its WHERE clause, not projected here. The remaining nine — ``model``,
+# ``status``, ``outcome``, ``objective``, ``request_id``, ``task_id``, ``team``,
+# ``total_tokens``, ``id`` — are not needed at all, so a wide trace table never
+# becomes a wide read.
+_ROLLUP_COLUMNS = (
+    "agent_key",
+    "phase",
+    "cost_usd",
+    "input_tokens",
+    "output_tokens",
+    "cache_read_tokens",
+    "cache_creation_tokens",
+    "latency_ms",
 )
 
 
@@ -177,6 +196,58 @@ def fetch_cost_since(cutoff: datetime) -> dict[str, Any]:
         return empty
 
 
+def fetch_traces_since(cutoff: datetime, *, job_id: Optional[str] = None) -> list[dict[str, Any]]:
+    """Return ``se_agent_traces`` rows with ``ts >= cutoff``, for the agent/phase rollup.
+
+    A thin, narrow read: it selects only :data:`_ROLLUP_COLUMNS` — the columns
+    :func:`software_engineering_team.metrics.agent_rollup.compute_from_traces` reads —
+    and does no aggregation or arithmetic of its own; grouping and percentiles are
+    the pure function's job, not this one's.
+
+    Preconditions:
+        - ``cutoff`` is a timezone-aware datetime.
+        - ``job_id``, if given, is matched by exact equality. ``""`` is a real,
+          queryable ``job_id`` (the column's default for calls that aren't
+          job-attributed), not a "no filter" sentinel — pass ``None`` (the
+          default) to skip the ``job_id`` predicate entirely and read every job.
+    Postconditions:
+        - Returns a list of dict rows (keys: the members of :data:`_ROLLUP_COLUMNS`);
+          ``[]`` when Postgres is disabled or the query fails (logged at DEBUG).
+        - Rows are returned in no particular order: the caller is a pure
+          aggregation that does not depend on row order, so no ``ORDER BY`` is
+          applied — sorting here would cost a query-time sort for no behavioral
+          gain.
+        - A wide window with no ``job_id`` filter can return every matching row;
+          percentiles cannot be computed SQL-side, so this intentionally has no
+          row cap. The column projection above is the narrowing this function
+          applies; truncating rows would silently understate the rollup's
+          counts and percentiles, which is worse than a slow query.
+    Raises:
+        - ``ValueError`` if ``cutoff`` is naive — a naive bound is compared in the
+          session TimeZone and would silently shift the aggregation window.
+    """
+    if cutoff.tzinfo is None:
+        raise ValueError("cutoff must be a timezone-aware datetime")
+    try:
+        with pg_cursor(dict_rows=True) as cur:
+            if cur is None:
+                return []
+            where = "ts >= %s"
+            params: list[Any] = [cutoff]  # 1) WHERE ts >= %s
+            if job_id is not None:
+                where += " AND job_id = %s"
+                params.append(job_id)  # 2) optional exact job_id match
+            cur.execute(
+                f"SELECT {', '.join(_ROLLUP_COLUMNS)} FROM se_agent_traces WHERE {where}",
+                tuple(params),
+            )
+            rows = list(cur.fetchall())
+        return rows
+    except Exception:
+        logger.debug("failed to fetch traces since %s (job_id=%r)", cutoff, job_id, exc_info=True)
+        return []
+
+
 def prune_traces(retention_days: float | None = None) -> int:
     """Delete traces older than the retention window; returns rows removed."""
     days = _retention_days() if retention_days is None else retention_days
@@ -199,5 +270,6 @@ __all__ = [
     "write_trace",
     "write_rows",
     "fetch_cost_since",
+    "fetch_traces_since",
     "prune_traces",
 ]
