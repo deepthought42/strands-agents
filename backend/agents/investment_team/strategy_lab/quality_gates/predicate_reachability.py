@@ -24,7 +24,11 @@ it calls for a different fix (reorder or loosen, not delete). The verdict is
 taken against the UNION of every earlier rule, and only once at least
 ``_MIN_STARVATION_FIRES`` covered fires have been observed; below that the probe
 abstains with an ``info`` rather than mistaking a rarely-firing rule for a
-starved one.
+starved one. A rule whose only unshadowed fires land on the warmup prefix —
+where the earlier rules cannot yet fire, and where ``replay_entries`` therefore
+really does select it — is reported as a ``warning`` instead, since it does
+open positions and the ``critical``'s "contributes no entries" claim would be
+false about it.
 
 Path semantics:
   * Compiled path (``requires_custom_code=False``): the engine decides entries
@@ -201,7 +205,9 @@ class _PairCooccurrence:
         return self.judged and self.later_fires > 0 and self.later_independent_fires == 0
 
 
-_StarvationVerdict = Literal["abstained_bars", "dead", "abstained_thin", "starved", "reachable"]
+_StarvationVerdict = Literal[
+    "abstained_bars", "dead", "abstained_thin", "starved", "warmup_only", "reachable"
+]
 
 
 @dataclass(frozen=True)
@@ -216,15 +222,27 @@ class _RuleStarvation:
     earlier rule at a time and therefore misses rules that several earlier
     rules jointly cover without any one of them being a superset.
 
-    Fields are all counted over the SAME denominator: the bars where rule
-    ``rule_index`` and EVERY rule before it are post-warmup — the only bars on
-    which "did any earlier rule already fire here" is a judged fact.
+    ``evaluated``/``fires``/``independent_fires``/``coverage`` are all counted
+    over the SAME denominator: the bars where rule ``rule_index`` and EVERY
+    rule before it are post-warmup — the steady-state window, where every
+    earlier rule is actually able to compete for priority.
+
+    :attr:`warmup_independent_fires` is the one field counted OUTSIDE that
+    window, and it exists because the steady-state window alone cannot answer
+    the question the finding claims to answer. ``evaluate_entry_rules`` selects
+    a rule only on ``"satisfied"``, so an earlier rule that is still warming up
+    does NOT win its bar — and ``replay_entries`` walks every bar from index 0,
+    warmup included. A rule that fires on the warmup prefix while no earlier
+    rule is satisfied therefore DOES open positions, however thoroughly the
+    steady-state window shadows it. Counting those bars is what keeps
+    :attr:`verdict` from claiming "contributes no entries" about a rule that
+    demonstrably contributes some.
 
     Invariants: ``rule_index >= 1`` (rule 0 has nothing before it and can never
-    be starved); ``0 <= independent_fires <= fires <= evaluated``; ``coverage``
-    is ordered by descending covered-fire count then ascending rule index, and
-    holds only earlier rules that covered at least one fire — enforced in
-    :meth:`__post_init__`.
+    be starved); ``0 <= independent_fires <= fires <= evaluated``;
+    ``warmup_independent_fires >= 0``; ``coverage`` is ordered by descending
+    covered-fire count then ascending rule index, and holds only earlier rules
+    that covered at least one fire — enforced in :meth:`__post_init__`.
     """
 
     rule_index: int
@@ -234,6 +252,7 @@ class _RuleStarvation:
     independent_fires: int
     coverage: tuple[tuple[int, int], ...]
     legs: tuple[_PairLegCooccurrence, ...]
+    warmup_independent_fires: int = 0
 
     def __post_init__(self) -> None:
         """Enforce the counting and ordering invariants at construction time."""
@@ -241,6 +260,7 @@ class _RuleStarvation:
         assert 0 <= self.independent_fires <= self.fires <= self.evaluated, (
             "independent_fires <= fires <= evaluated must hold"
         )
+        assert self.warmup_independent_fires >= 0, "warmup_independent_fires must be >= 0"
         assert all(count > 0 for _, count in self.coverage), (
             "coverage must hold only earlier rules that covered at least one fire"
         )
@@ -273,29 +293,42 @@ class _RuleStarvation:
           * ``"abstained_bars"`` — fewer than ``_MIN_EVALUATED_BARS`` bars
             judged against every earlier rule; a window-coverage problem, not a
             reachability verdict.
-          * ``"dead"`` — the rule never fires at all. Already reported once, per
-            rule, by :meth:`PredicateReachabilityProbe.to_gate_results`, so
+          * ``"reachable"`` — fires at least once, in the steady-state window,
+            on a bar no earlier rule covers, so first-match-wins can actually
+            select it.
+          * ``"warmup_only"`` — never independent in the steady-state window,
+            but fires on at least one warmup-prefix bar where no earlier rule
+            is satisfied. ``evaluate_entry_rules`` DOES select it there, so it
+            is neither starved (it contributes entries) nor plainly reachable
+            (it stops contributing the moment the earlier rules warm up).
+          * ``"dead"`` — never fires in the steady-state window, and never
+            independently on the warmup prefix either. Already reported once,
+            per rule, by :meth:`PredicateReachabilityProbe.to_gate_results`, so
             starvation reporting deliberately stays silent about it rather than
             double-reporting the same rule under two finding kinds.
-          * ``"reachable"`` — fires at least once on a bar no earlier rule
-            covers, so first-match-wins can actually select it.
           * ``"abstained_thin"`` — fires, none of them independent, but fewer
             than ``_MIN_STARVATION_FIRES`` of them: too few observations to
             separate structural starvation from a merely rarely-firing rule.
           * ``"starved"`` — fires enough times, and never on a bar that no
-            earlier rule covers. This is the reportable finding.
-        The last three rungs are mutually exclusive regardless of check
-        order (a rule with an independent fire cannot also satisfy the
-        "zero independent fires" precondition ``abstained_thin``/``starved``
-        share), so only the first two need their listed order to match the
-        code exactly. Deterministic; depends only on this instance's counts.
+            earlier rule covers, on the warmup prefix or after. This is the
+            reportable finding.
+        ``"warmup_only"`` is checked before ``"dead"`` deliberately: a rule
+        whose every fire lands on the warmup prefix has ``fires == 0`` in the
+        steady-state window, yet :meth:`PredicateReachabilityProbe.probe`
+        counts those same bars and reports it as firing — calling it dead here
+        would contradict that and lose the finding entirely. The bottom two
+        rungs are mutually exclusive with ``"reachable"``/``"warmup_only"``
+        regardless of check order (both require zero independent fires of
+        either kind). Deterministic; depends only on this instance's counts.
         """
         if self.evaluated < _MIN_EVALUATED_BARS:
             return "abstained_bars"
-        if self.fires == 0:
-            return "dead"
         if self.independent_fires > 0:
             return "reachable"
+        if self.warmup_independent_fires > 0:
+            return "warmup_only"
+        if self.fires == 0:
+            return "dead"
         if self.fires < _MIN_STARVATION_FIRES:
             return "abstained_thin"
         return "starved"
@@ -397,13 +430,18 @@ def _starvation_verdicts(
     Postconditions: pure (no I/O, no bar-walking, no predicate evaluation);
     returns one :class:`_RuleStarvation` per rule index ``j >= 1``, in
     ascending ``j`` order — an empty list when there are fewer than 2 rules.
-    Every count is taken over the bars where rule ``j`` AND all rules before it
+    ``evaluated``/``fires``/``independent_fires``/``coverage`` are taken over
+    the steady-state window — the bars where rule ``j`` AND all rules before it
     are non-``"warmup"``: ``fires`` counts rule ``j``'s satisfied bars there,
     ``independent_fires`` the subset where NO earlier rule is satisfied (the
     bars on which first-match-wins could actually select ``j``), and
     ``coverage`` attributes each remaining fire to every earlier rule satisfied
-    on it. ``legs`` is always empty here — the per-leg diagnostic needs the
-    views this function deliberately does not take, and is filled in by
+    on it. ``warmup_independent_fires`` counts the bars OUTSIDE that window —
+    rule ``j`` non-``"warmup"`` and satisfied, at least one earlier rule still
+    warming up, and no earlier rule satisfied — because ``evaluate_entry_rules``
+    selects on ``"satisfied"`` alone and so genuinely returns ``j`` there.
+    ``legs`` is always empty here — the per-leg diagnostic needs the views this
+    function deliberately does not take, and is filled in by
     :meth:`PredicateReachabilityProbe.probe_starvation`.
 
     The earlier-rule state is folded in one rule at a time as ``j`` advances,
@@ -431,9 +469,14 @@ def _starvation_verdicts(
         evaluated = 0
         fires = 0
         independent_fires = 0
+        warmup_independent_fires = 0
         covered: Dict[int, int] = {}
         for k, status in enumerate(statuses[j]):
-            if status == "warmup" or any_earlier_warmup[k]:
+            if status == "warmup":
+                continue
+            if any_earlier_warmup[k]:
+                if status == "satisfied" and not earlier_hits[k]:
+                    warmup_independent_fires += 1
                 continue
             evaluated += 1
             if status != "satisfied":
@@ -455,6 +498,7 @@ def _starvation_verdicts(
                 independent_fires=independent_fires,
                 coverage=tuple(sorted(covered.items(), key=lambda kv: (-kv[1], kv[0]))),
                 legs=(),
+                warmup_independent_fires=warmup_independent_fires,
             )
         )
     return out
@@ -600,6 +644,14 @@ class PredicateReachabilityProbe(GateResultsMixin):
         time. Every rule pairs with every earlier rule regardless of ``side``,
         matching ``evaluate_entry_rules``' default ``side_filter=None``.
 
+        Unlike :meth:`probe_pairs` — which drops any bar either side of a pair
+        is warming up on, since a pairwise tally has no notion of "the earlier
+        rules as a whole" — the starvation verdict keeps a rule's warmup-prefix
+        fires as :attr:`_RuleStarvation.warmup_independent_fires`. That is not
+        an inconsistency between the two: ``probe_pairs`` reports no findings,
+        while this verdict does, and a finding that ignored those bars would
+        call a rule starved that ``replay_entries`` demonstrably trades.
+
         Per-leg diagnostics are computed only for a ``"starved"`` verdict on a
         multi-leaf rule, decomposing the STARVED rule's own leaves against its
         :attr:`_RuleStarvation.dominant_index` coverer — the earlier rule that
@@ -724,6 +776,13 @@ class PredicateReachabilityProbe(GateResultsMixin):
             them) and ends with the three resolutions the design prompt already
             teaches, so a deliberate priority ordering is adjudicable rather
             than merely accused.
+          * ``"warmup_only"`` → ``warning`` on both paths. The rule DOES open
+            positions — on the warmup prefix, where the earlier rules cannot
+            yet fire — so ``critical``'s "contributes no entries" claim would
+            be false; but it stops contributing the moment those rules warm up,
+            which is a shadowing bug the author still has to see. A warning on
+            the compiled path says exactly that, and the custom path adds its
+            usual caveat without escalating.
           * ``"abstained_bars"`` / ``"abstained_thin"`` → ``info``, so an
             abstention is visible on the gate timeline instead of being
             indistinguishable from "checked, nothing found".
@@ -761,6 +820,32 @@ class PredicateReachabilityProbe(GateResultsMixin):
                             rule_id=rule_id,
                         )
                     )
+                elif kind == "warmup_only":
+                    steady_state = (
+                        f"it fires {v.fires} time(s), every one of them also covered by an "
+                        f"earlier rule ({_coverage_text(v.coverage)})"
+                        if v.fires
+                        else "it never fires at all"
+                    )
+                    detail = (
+                        f"Entry rule {rule_id} (side={v.side}) is selectable only while an "
+                        f"earlier rule is still warming up: it fires on "
+                        f"{v.warmup_independent_fires} warmup-prefix bar(s) that no earlier rule "
+                        f"is satisfied on, but across the {v.evaluated} bar(s) where every "
+                        f"earlier rule is warm {steady_state}. It will open positions at the "
+                        "start of the window and then never again, so its contribution is an "
+                        "artefact of the fetched window's left edge rather than of the strategy. "
+                        "Resolve it the same way as a starved rule — fold its conditions into "
+                        "the earlier rule's all_of, list it BEFORE the broader rule if it is the "
+                        "intended higher priority, or loosen it so it can fire where the earlier "
+                        "rules don't."
+                    )
+                    if custom:
+                        detail += (
+                            " (custom-code path: the executed code may differ from the spec, but "
+                            "the authored entry logic is shadowed on this data.)"
+                        )
+                    results.append(self._warning(detail, rule_id=rule_id))
                 elif kind == "starved":
                     detail = (
                         f"Entry rule {rule_id} (side={v.side}) is structurally starved: it fires "

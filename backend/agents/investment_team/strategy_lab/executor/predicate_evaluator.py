@@ -265,14 +265,20 @@ def evaluate_entry_rules(
         ever sees rules of that one side, so priority is scoped to that subset
         for that call.
 
-    Structurally starved (the concept the reachability-probe extension in
-    Step 2 of issue #7486 must detect, distinct from "dead"):
+    Structurally starved (the concept the reachability probe detects,
+    distinct from "dead"):
         Fix a spec + fetched market-data window (the same data-dependent frame
         :class:`~..quality_gates.predicate_reachability.PredicateReachabilityProbe`
         already evaluates against). For entry-rule index ``j``, let ``S_j`` be
-        the set of (symbol, bar) pairs, post-warmup, where rule ``j``'s
-        predicate tree (``evaluate_tree(rule.when, view, i)``) evaluates to
-        ``"satisfied"``.
+        the set of (symbol, bar) pairs where rule ``j``'s predicate tree
+        (``evaluate_tree(rule.when, view, i)``) evaluates to ``"satisfied"``.
+        Membership keys on ``"satisfied"`` and nothing else, because that is
+        the only status the loop below acts on: a rule still warming up at bar
+        ``i`` is simply not in ``S_i``, exactly as a rule whose predicate is
+        false there is not. This matters for the set relations that follow —
+        the warmup prefix is not a hole in the analysis, it is a stretch of
+        bars where the warming-up rules are absent from the union and the
+        later rules can therefore win.
 
         * **dead** (existing probe concept, unchanged) — ``S_j`` is empty:
           the rule never fires under any ordering.
@@ -288,6 +294,15 @@ def evaluate_entry_rules(
         * **reachable** — ``S_j \\ union(S_i for i < j)`` is non-empty: there
           is at least one bar where rule ``j`` fires and no earlier rule does,
           so it CAN be the value this loop returns.
+
+        Because warmup does not put a rule into ``S_i``, a rule ``j`` whose
+        only members of ``S_j \\ union(S_i for i < j)`` sit in the window's
+        warmup prefix is *reachable* by this definition, not starved — and it
+        genuinely is: ``executor/reference_entries.py``'s ``replay_entries``
+        walks every bar from index 0 and will open positions from it there.
+        It is still worth flagging, because it stops contributing the moment
+        the earlier rules warm up; the probe reports that case as its own
+        lesser finding rather than folding it into either verdict.
 
         Like "dead"/"reachable", "structurally starved" is a per-dataset,
         data-dependent verdict — the same spec can be starved on one fetched
