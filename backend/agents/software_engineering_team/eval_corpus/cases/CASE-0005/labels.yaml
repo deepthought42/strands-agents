@@ -1,0 +1,13 @@
+- label_id: L1
+  gate: code_review
+  defect_class: naming
+  severity: low
+  polarity: must_find
+  file_path: app/agents/support_agent/logging.py
+  line: 1
+  line_end: 1
+  description: >
+    New helper module named `logging.py` shadows the stdlib `logging` module
+    for any sibling that does `import logging`, so `logger =
+    logging.getLogger(__name__)` in the package resolves to this module
+    instead.

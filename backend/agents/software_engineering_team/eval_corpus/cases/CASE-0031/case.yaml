@@ -1,0 +1,9 @@
+case_id: CASE-0031
+title: Read-then-delete is not atomic, so pop can return stale data
+language: python
+stack: fastapi
+gates: [qa]
+mode: diff
+origin:
+  sourcing: real
+  commit: 56c2fcd

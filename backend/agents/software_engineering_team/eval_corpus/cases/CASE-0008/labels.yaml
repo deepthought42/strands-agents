@@ -1,0 +1,12 @@
+- label_id: L1
+  gate: code_review
+  defect_class: logic
+  severity: high
+  polarity: must_find
+  file_path: backend/agents/job_matching_team/agents/ranker.py
+  line: 134
+  line_end: 134
+  description: >
+    Substring containment means excluding "Apple" also excludes unrelated
+    companies whose name merely contains it, such as "Appleton"; the
+    comparison needs word boundaries.

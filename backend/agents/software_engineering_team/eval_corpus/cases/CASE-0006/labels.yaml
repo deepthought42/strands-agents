@@ -1,0 +1,12 @@
+- label_id: L1
+  gate: code_review
+  defect_class: structure
+  severity: medium
+  polarity: must_find
+  file_path: app/agents/triage_agent/agent.py
+  line: 11
+  line_end: 17
+  description: >
+    `TriageResult` is a Pydantic response model declared inline in `agent.py`.
+    The leaf-agent convention in this codebase puts request/response models in
+    the sibling `models.py`, which `agent.py` already imports from.

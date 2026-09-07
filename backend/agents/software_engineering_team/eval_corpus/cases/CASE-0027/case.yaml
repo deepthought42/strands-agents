@@ -1,0 +1,12 @@
+case_id: CASE-0027
+title: User-configured URL fetched with no destination restriction
+language: python
+stack: fastapi
+gates: [security]
+mode: diff
+origin:
+  sourcing: invented
+  note: >
+    No SSRF defect and no SSRF-guard code was found in history. Modelled on
+    the real user-configured outbound URLs this platform does have
+    (integration server URLs, webhook URLs, and configurable model base URLs).

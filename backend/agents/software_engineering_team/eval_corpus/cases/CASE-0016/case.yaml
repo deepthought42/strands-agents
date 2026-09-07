@@ -1,0 +1,9 @@
+case_id: CASE-0016
+title: Review-gated execution loop hand-inlined in each team orchestrator
+language: python
+stack: fastapi
+gates: [code_review]
+mode: diff
+origin:
+  sourcing: real
+  commit: 51810fd5

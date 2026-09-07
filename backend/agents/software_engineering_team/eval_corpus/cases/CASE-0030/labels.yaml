@@ -1,0 +1,12 @@
+- label_id: L1
+  gate: qa
+  defect_class: race-condition
+  severity: high
+  polarity: must_find
+  file_path: backend/agents/investment_team/api/main.py
+  line: 4437
+  line_end: 4437
+  description: >
+    Sessions are enumerated under the lock, the lock is dropped, and the
+    recovered records are written back afterwards. A concurrent writer between
+    the two phases has its update overwritten by this stale snapshot.

@@ -1,0 +1,12 @@
+- label_id: L1
+  gate: qa
+  defect_class: resource-leak
+  severity: high
+  polarity: must_find
+  file_path: user-interface/src/app/components/process-designer-chat/process-designer-chat.component.ts
+  line: null
+  line_end: null
+  description: >
+    The component opens many long-lived subscriptions across its methods and
+    implements no `ngOnDestroy`, so none of them is unsubscribed and every one
+    keeps the destroyed component instance alive.

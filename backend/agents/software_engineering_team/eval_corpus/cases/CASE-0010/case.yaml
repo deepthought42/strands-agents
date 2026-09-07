@@ -1,0 +1,13 @@
+case_id: CASE-0010
+title: Endpoint returns a shape the documented response contract forbids
+language: python
+stack: fastapi
+gates: [code_review]
+mode: diff
+origin:
+  sourcing: invented
+  note: >
+    Real candidates found in history build the spec-compliance check itself
+    rather than being an application defect it later caught; the gate blocks
+    merge on review approval, so a spec violation reaching main is close to
+    the failure mode it exists to prevent.

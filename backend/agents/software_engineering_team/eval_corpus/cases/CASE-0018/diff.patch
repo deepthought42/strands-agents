@@ -1,0 +1,12 @@
+diff --git a/backend/agents/investment_team/api/main.py b/backend/agents/investment_team/api/main.py
+index d3e95956..0fde0268 100644
+--- a/backend/agents/investment_team/api/main.py
++++ b/backend/agents/investment_team/api/main.py
+@@ -3775,7 +3775,6 @@ def _run_paper_trading_background(
+             if raw is not None:
+                 session = PaperTradingSession.parse_persisted(raw)
+                 session.status = PaperTradingStatus.FAILED
+-                session.error = f"Paper trading crashed: {exc}"
+                 session.divergence_analysis = f"Paper trading crashed: {exc}"
+                 session.completed_at = datetime.now(tz=timezone.utc).isoformat()
+                 _paper_trading_sessions[session_id] = session

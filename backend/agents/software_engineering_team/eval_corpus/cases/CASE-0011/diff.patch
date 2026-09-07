@@ -1,0 +1,16 @@
+diff --git a/backend/agents/sales_team/outcome_store.py b/backend/agents/sales_team/outcome_store.py
+index 94eef510..b48987ec 100644
+--- a/backend/agents/sales_team/outcome_store.py
++++ b/backend/agents/sales_team/outcome_store.py
+@@ -27,9 +27,9 @@ from .models import DealOutcome, LearningInsights, StageOutcome
+ logger = logging.getLogger(__name__)
+ 
+ _LOCK = threading.Lock()
+-_CACHE_ROOT = Path(os.getenv("AGENT_CACHE", ".agent_cache")) / "sales_team" / "outcomes"
++_CACHE_ROOT = Path(os.getenv("AGENT_CACHE_DIR", ".agent_cache")) / "sales_team" / "outcomes"
+ _INSIGHTS_PATH = (
+-    Path(os.getenv("AGENT_CACHE", ".agent_cache")) / "sales_team" / "insights" / "current.json"
++    Path(os.getenv("AGENT_CACHE_DIR", ".agent_cache")) / "sales_team" / "insights" / "current.json"
+ )
+ 
+ 

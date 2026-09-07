@@ -1,0 +1,31 @@
+diff --git a/app/api/routes/reports.py b/app/api/routes/reports.py
+new file mode 100644
+--- /dev/null
++++ b/app/api/routes/reports.py
+@@ -0,0 +1,26 @@
++"""Report read endpoints."""
++
++from __future__ import annotations
++
++from fastapi import APIRouter, HTTPException
++
++from ..models.reports import ReportDetail, ReportSummary
++from ..services import report_store
++
++router = APIRouter(prefix="/reports", tags=["reports"])
++
++
++@router.get("/{report_id}/summary", response_model=ReportSummary)
++def get_report_summary(report_id: str) -> ReportDetail:
++    """Return the summary view of one report.
++
++    Preconditions:
++        * ``report_id`` is a non-empty identifier.
++    Postconditions:
++        * Returns the stored report, or raises 404 when it does not exist.
++    """
++    assert report_id, "report_id is required"
++    detail = report_store.load(report_id)
++    if detail is None:
++        raise HTTPException(status_code=404, detail="Report not found")
++    return detail

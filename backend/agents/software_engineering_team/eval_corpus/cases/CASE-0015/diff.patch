@@ -1,0 +1,40 @@
+diff --git a/backend/agents/agent_platform/sandbox/agent_sandbox_runtime/tests/test_entrypoint.py b/backend/agents/agent_platform/sandbox/agent_sandbox_runtime/tests/test_entrypoint.py
+new file mode 100644
+--- /dev/null
++++ b/backend/agents/agent_platform/sandbox/agent_sandbox_runtime/tests/test_entrypoint.py
+@@ -0,0 +1,35 @@
++"""Boot tests for the sandbox runtime entrypoint.
++
++This package is team-agnostic platform infrastructure: its own import graph
++reaches only ``agent_platform`` and ``shared.*``, never a domain team package.
++"""
++
++from __future__ import annotations
++
++import json
++
++import pytest
++from fastapi.testclient import TestClient
++
++from agent_team_studio.agentic_team_provisioning.manifest_generation import (
++    build_agent_manifest,
++)
++
++
++@pytest.fixture()
++def client(tmp_path, monkeypatch) -> TestClient:
++    """Boot the sandbox app against an injected manifest."""
++    from agent_sandbox_runtime.entrypoint import _build_app
++
++    manifest = build_agent_manifest(agent_name="probe", role="Probe")
++    manifest_path = tmp_path / "manifest.json"
++    manifest_path.write_text(json.dumps(manifest.model_dump()), encoding="utf-8")
++    monkeypatch.setenv("SANDBOX_MANIFEST_PATH", str(manifest_path))
++    return TestClient(_build_app())
++
++
++def test_entrypoint_binds_injected_manifest(client: TestClient) -> None:
++    """A booted container dispatches through the bound persona."""
++    response = client.post("/invoke", json={"input": "ping"})
++    assert response.status_code == 200
++    assert "Probe" in response.json()["system_prompt"]

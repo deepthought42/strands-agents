@@ -1,0 +1,13 @@
+- label_id: L1
+  gate: code_review
+  defect_class: logic
+  severity: medium
+  polarity: must_find
+  file_path: user-interface/src/app/components/coding-team-page/out-of-scope-issues/out-of-scope-issues.component.html
+  line: 75
+  line_end: 75
+  description: >
+    `MatCheckbox` declares `aria-label` as an `@Input` and explicitly nulls
+    the host attribute, so binding `[attr.aria-label]` never reaches the
+    native input and every row checkbox ends up unlabeled. It must be bound as
+    `[aria-label]`.

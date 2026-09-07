@@ -1,0 +1,28 @@
+diff --git a/app/integrations/probe.py b/app/integrations/probe.py
+new file mode 100644
+--- /dev/null
++++ b/app/integrations/probe.py
+@@ -0,0 +1,23 @@
++"""Reachability probe for a user-configured integration endpoint."""
++
++from __future__ import annotations
++
++import httpx
++
++from ..models.integrations import IntegrationConfig
++
++_TIMEOUT = httpx.Timeout(5.0)
++
++
++def probe(config: IntegrationConfig) -> int:
++    """Check that a configured integration endpoint answers.
++
++    Preconditions:
++        * ``config.base_url`` is a non-empty URL string.
++    Postconditions:
++        * Returns the HTTP status code the endpoint answered with.
++    """
++    assert config.base_url, "base_url is required"
++    with httpx.Client(timeout=_TIMEOUT, follow_redirects=True) as client:
++        response = client.get(f"{config.base_url.rstrip('/')}/health")
++        return response.status_code

@@ -1,0 +1,9 @@
+case_id: CASE-0040
+title: Catch-all reported as a specific, unrelated failure
+language: python
+stack: fastapi
+gates: [qa]
+mode: diff
+origin:
+  sourcing: real
+  commit: 87a02c2

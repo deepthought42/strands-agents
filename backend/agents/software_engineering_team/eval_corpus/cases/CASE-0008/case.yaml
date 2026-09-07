@@ -1,0 +1,9 @@
+case_id: CASE-0008
+title: Excluded-company match uses substring instead of word boundaries
+language: python
+stack: temporal-worker
+gates: [code_review]
+mode: diff
+origin:
+  sourcing: real
+  commit: 766c6e5

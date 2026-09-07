@@ -1,0 +1,9 @@
+case_id: CASE-0038
+title: One store method skips the path validation its siblings apply
+language: python
+stack: fastapi
+gates: [qa]
+mode: diff
+origin:
+  sourcing: real
+  commit: 0436308

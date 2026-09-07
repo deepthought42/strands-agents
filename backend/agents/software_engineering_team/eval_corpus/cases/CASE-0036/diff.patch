@@ -1,0 +1,41 @@
+diff --git a/user-interface/src/app/services/ledger.service.ts b/user-interface/src/app/services/ledger.service.ts
+new file mode 100644
+--- /dev/null
++++ b/user-interface/src/app/services/ledger.service.ts
+@@ -0,0 +1,36 @@
++import { Injectable, inject } from '@angular/core';
++import { HttpClient } from '@angular/common/http';
++import { Observable, map } from 'rxjs';
++
++/** One posting as returned by the upstream ledger API. */
++export interface LedgerEntry {
++  entryId: number;
++  amountMinor: number;
++  memo: string;
++}
++
++@Injectable({ providedIn: 'root' })
++export class LedgerService {
++  private readonly http = inject(HttpClient);
++
++  /**
++   * Load one page of ledger entries.
++   *
++   * Preconditions: `account` is a non-empty account identifier.
++   * Postconditions: emits the page's entries in upstream order.
++   */
++  listEntries(account: string): Observable<LedgerEntry[]> {
++    return this.http.get<{ entries: unknown[] }>(`/api/ledger/${account}`).pipe(
++      map((page) =>
++        page.entries.map((raw) => {
++          const row = raw as Record<string, unknown>;
++          return {
++            entryId: Number(row['entry_id']),
++            amountMinor: Number(row['amount_minor']),
++            memo: String(row['memo'] ?? ''),
++          };
++        }),
++      ),
++    );
++  }
++}

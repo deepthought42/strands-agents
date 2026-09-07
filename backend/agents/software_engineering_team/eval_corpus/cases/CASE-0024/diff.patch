@@ -1,0 +1,16 @@
+diff --git a/backend/agents/software_engineering_team/linting_tool_agent/agent.py b/backend/agents/software_engineering_team/linting_tool_agent/agent.py
+index a69f1a4f..00c45b33 100644
+--- a/backend/agents/software_engineering_team/linting_tool_agent/agent.py
++++ b/backend/agents/software_engineering_team/linting_tool_agent/agent.py
+@@ -114,10 +114,7 @@ class LintingToolAgent:
+                 continue
+             if len(seen_files) >= MAX_AFFECTED_FILES:
+                 break
+-            file_abs = (repo_path / issue.file_path).resolve()
+-            repo_resolved = repo_path.resolve()
+-            if file_abs != repo_resolved and repo_resolved not in file_abs.parents:
+-                continue
++            file_abs = repo_path / issue.file_path
+             if not file_abs.is_file():
+                 continue
+             try:

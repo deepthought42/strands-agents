@@ -62,6 +62,9 @@ language: python             # or typescript, etc.
 stack: fastapi                # free text, e.g. fastapi, angular, temporal-worker
 gates: [code_review, security]   # subset of {code_review, qa, security} — which gates this case scores
 mode: diff                    # "diff" or "files" — see below
+origin:                       # where the case came from — see "Provenance" below
+  sourcing: real              # real | invented
+  commit: 0040820             # short SHA of the origin commit; required when sourcing: real
 expected_findings:
   - <label>                    # zero or more; see §2
   - <label>
@@ -110,6 +113,29 @@ keep `expected_findings` inline in `case.yaml` instead.
 
 YAML is chosen because it is diff-friendly line by line in a pull-request
 review, matching the "human-reviewable in a PR" requirement.
+
+### Provenance
+
+`origin` is a required top-level field. It records where the case's fixture
+came from, so a reader can tell evidence grounded in a defect this repository
+actually shipped from a plausible construction, without leaving the case file:
+
+- **`sourcing`** is `real` or `invented`.
+- **`commit`** is the short SHA of the origin commit and is required when
+  `sourcing: real`, omitted otherwise. That commit is the *fix* — the ground
+  truth for what the defect was and where it lived. A real case's `diff.patch`
+  is therefore the inverse of that commit, reduced to the files carrying the
+  defect, and its labels' line numbers are positions in the post-diff file
+  (the state of the file at the fix commit's parent). A real case stays pinned
+  to its origin commit; it is not resynchronized as the repository moves on.
+- **`note`** is required when `sourcing: invented` and states why no real
+  example was available — a search that came back empty, or a structural
+  reason the class cannot survive in merged history. "No example was found"
+  alone is not a reason.
+
+A case whose fixture is authored rather than derived is not second-class, but
+it is a weaker grade of evidence, and this field is what keeps that difference
+visible to anyone reading a metric computed over the corpus.
 
 ### Case identifier policy
 

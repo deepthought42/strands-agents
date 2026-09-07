@@ -1,0 +1,46 @@
+diff --git a/app/agents/triage_agent/agent.py b/app/agents/triage_agent/agent.py
+new file mode 100644
+--- /dev/null
++++ b/app/agents/triage_agent/agent.py
+@@ -0,0 +1,41 @@
++"""Triage agent: classifies an inbound support ticket."""
++
++from __future__ import annotations
++
++from pydantic import BaseModel, Field
++
++from .models import TriageRequest
++from .prompts import TRIAGE_PROMPT
++
++
++class TriageResult(BaseModel):
++    """Structured outcome of one triage pass."""
++
++    category: str = Field(description="Routing category for the ticket.")
++    urgency: int = Field(ge=1, le=5, description="1 is lowest, 5 is highest.")
++    rationale: str = Field(default="", description="Why this category was chosen.")
++    needs_human: bool = Field(default=False)
++
++
++class TriageAgent:
++    """Classifies a ticket into a routing category.
++
++    Invariants:
++        * ``self._llm`` is never None after construction.
++    """
++
++    def __init__(self, llm) -> None:
++        assert llm is not None, "llm client is required"
++        self._llm = llm
++
++    def run(self, request: TriageRequest) -> TriageResult:
++        """Classify one ticket.
++
++        Preconditions:
++            * ``request.body`` is non-empty.
++        Postconditions:
++            * Returns a ``TriageResult`` whose ``urgency`` is within 1..5.
++        """
++        assert request.body, "ticket body is required"
++        raw = self._llm.complete_json(TRIAGE_PROMPT.format(body=request.body))
++        return TriageResult.model_validate(raw)

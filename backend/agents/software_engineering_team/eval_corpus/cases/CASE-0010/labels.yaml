@@ -1,0 +1,12 @@
+- label_id: L1
+  gate: code_review
+  defect_class: spec-compliance
+  severity: high
+  polarity: must_find
+  file_path: app/api/routes/reports.py
+  line: 13
+  line_end: 14
+  description: >
+    The route is declared `response_model=ReportSummary` but returns the full
+    `ReportDetail` payload, including the `raw_rows` field the summary
+    contract deliberately excludes.

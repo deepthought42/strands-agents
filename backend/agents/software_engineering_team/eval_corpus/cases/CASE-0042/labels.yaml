@@ -1,0 +1,11 @@
+- label_id: L1
+  gate: qa
+  defect_class: wrong-path
+  severity: high
+  polarity: must_find
+  file_path: app/services/mailer.py
+  line: 11
+  line_end: 11
+  description: >
+    The loader is pointed at `app/mail_templates`, but the templates live in
+    `app/templates/mail`, so every render raises TemplateNotFound at runtime.

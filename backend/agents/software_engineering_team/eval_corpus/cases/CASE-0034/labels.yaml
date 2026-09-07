@@ -1,0 +1,12 @@
+- label_id: L1
+  gate: qa
+  defect_class: null-deref
+  severity: high
+  polarity: must_find
+  file_path: backend/agents/investment_team/market_data_service.py
+  line: 893
+  line_end: 896
+  description: >
+    Each OHLC field is passed straight to `float()`. A missing value in the
+    upstream series arrives as `None` and raises, aborting the whole fetch
+    rather than skipping the one incomplete bar.

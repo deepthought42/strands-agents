@@ -1,0 +1,9 @@
+case_id: CASE-0021
+title: Trigger description interpolated unescaped into trusted SVG
+language: typescript
+stack: angular
+gates: [security]
+mode: diff
+origin:
+  sourcing: real
+  commit: 7e11ddc

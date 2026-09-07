@@ -1,0 +1,9 @@
+case_id: CASE-0018
+title: Crash handler leaves the dedicated error field unset
+language: python
+stack: fastapi
+gates: [code_review, qa]
+mode: diff
+origin:
+  sourcing: real
+  commit: c8cbbb7

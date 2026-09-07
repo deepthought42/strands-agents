@@ -1,0 +1,13 @@
+case_id: CASE-0043
+title: Discriminated union member accessed on the wrong branch
+language: typescript
+stack: angular
+gates: [qa]
+mode: files
+origin:
+  sourcing: invented
+  note: >
+    Same structural reason as the other build-failure classes. Informed by a
+    real typing-looseness defect in this repository, where a server-sent event
+    was typed as a catch-all index signature rather than a discriminated
+    union.

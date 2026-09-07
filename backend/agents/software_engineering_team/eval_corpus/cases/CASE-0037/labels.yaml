@@ -1,0 +1,12 @@
+- label_id: L1
+  gate: qa
+  defect_class: unvalidated-input
+  severity: critical
+  polarity: must_find
+  file_path: backend/agents/agent_provisioning_team/shared/credential_store.py
+  line: 312
+  line_end: 312
+  description: >
+    `agent_id` reaches this method straight from an HTTP request and is
+    interpolated into a filename with no validation, so a traversal sequence
+    escapes the store directory entirely.

@@ -1,0 +1,12 @@
+- label_id: L1
+  gate: security
+  defect_class: insecure-deserialization
+  severity: critical
+  polarity: must_find
+  file_path: app/cache/session_cache.py
+  line: 21
+  line_end: 21
+  description: >
+    `pickle.loads` is called on bytes read back from a shared cache. Anyone
+    able to write to that cache gets arbitrary code execution in this process;
+    a data-only format is required here.

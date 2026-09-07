@@ -1,0 +1,9 @@
+case_id: CASE-0035
+title: Explicit null field stringified into the literal "None"
+language: python
+stack: fastapi
+gates: [qa]
+mode: diff
+origin:
+  sourcing: real
+  commit: fd3b9a0

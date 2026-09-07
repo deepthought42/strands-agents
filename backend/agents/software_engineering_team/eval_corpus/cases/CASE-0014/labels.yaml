@@ -1,0 +1,12 @@
+- label_id: L1
+  gate: code_review
+  defect_class: testing
+  severity: high
+  polarity: must_find
+  file_path: user-interface/src/app/components/agent-team-studio/agent-console/agent-runner/agent-runner.component.spec.ts
+  line: 484
+  line_end: 489
+  description: >
+    The teardown mock never returns an Observable, so the subscribe chain
+    never runs. The assertion passes only because it compares against the same
+    cold values the sandbox already held before teardown was called.

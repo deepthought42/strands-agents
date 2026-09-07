@@ -1,0 +1,11 @@
+- label_id: L1
+  gate: qa
+  defect_class: missing-import
+  severity: high
+  polarity: must_find
+  file_path: app/services/report_builder.py
+  line: 14
+  line_end: 14
+  description: >
+    `datetime` is used to stamp the report but is never imported, so the
+    module raises NameError on the first call.

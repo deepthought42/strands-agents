@@ -1,0 +1,9 @@
+case_id: CASE-0009
+title: aria-label bound as a host attribute on mat-checkbox
+language: typescript
+stack: angular
+gates: [code_review]
+mode: diff
+origin:
+  sourcing: real
+  commit: 3fd49f5

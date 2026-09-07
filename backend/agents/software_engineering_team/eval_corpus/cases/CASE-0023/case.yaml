@@ -1,0 +1,9 @@
+case_id: CASE-0023
+title: Webhook signature verification skipped when the secret is unset
+language: python
+stack: fastapi
+gates: [security]
+mode: diff
+origin:
+  sourcing: real
+  commit: f1f605b

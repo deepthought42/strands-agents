@@ -1,0 +1,29 @@
+diff --git a/app/agents/support_agent/logging.py b/app/agents/support_agent/logging.py
+new file mode 100644
+--- /dev/null
++++ b/app/agents/support_agent/logging.py
+@@ -0,0 +1,24 @@
++"""Structured log helpers for the support agent."""
++
++from __future__ import annotations
++
++import json
++import logging as _stdlib_logging
++from typing import Any
++
++
++def event(name: str, **fields: Any) -> str:
++    """Render one structured log line.
++
++    Preconditions:
++        * ``name`` is a non-empty event name.
++    Postconditions:
++        * Returns a single-line JSON string with ``event`` set to ``name``.
++    """
++    assert name, "event name is required"
++    return json.dumps({"event": name, **fields}, sort_keys=True)
++
++
++def get_logger(module: str) -> _stdlib_logging.Logger:
++    """Return the module logger."""
++    return _stdlib_logging.getLogger(module)

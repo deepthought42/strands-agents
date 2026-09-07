@@ -1,0 +1,12 @@
+- label_id: L1
+  gate: code_review
+  defect_class: maintainability
+  severity: low
+  polarity: must_find
+  file_path: backend/agents/software_engineering_team/product_requirements_analysis_agent/question_processing.py
+  line: 200
+  line_end: 200
+  description: >
+    The `.get()` default already supplies the fallback, so the trailing `or`
+    is dead for the missing-key case and, worse, also overrides a legitimately
+    falsy value the model returned.

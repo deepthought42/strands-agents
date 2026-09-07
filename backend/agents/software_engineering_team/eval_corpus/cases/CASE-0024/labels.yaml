@@ -1,0 +1,24 @@
+- label_id: L1
+  gate: security
+  defect_class: auth
+  severity: critical
+  polarity: must_find
+  file_path: backend/agents/software_engineering_team/linting_tool_agent/agent.py
+  line: 117
+  line_end: 117
+  description: >
+    `issue.file_path` is joined onto the repository root and read with no
+    check that the resolved path stays inside it, so a traversal sequence
+    reads arbitrary files outside the repository the caller is authorized for.
+
+- label_id: L2
+  gate: qa
+  defect_class: unvalidated-input
+  severity: high
+  polarity: must_find
+  file_path: backend/agents/software_engineering_team/linting_tool_agent/agent.py
+  line: 117
+  line_end: 117
+  description: >
+    `issue.file_path` arrives from outside this function and is used to build
+    a filesystem path with no validation of its shape.

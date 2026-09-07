@@ -1,0 +1,13 @@
+- label_id: L1
+  gate: security
+  defect_class: ssrf
+  severity: high
+  polarity: must_find
+  file_path: app/integrations/probe.py
+  line: 21
+  line_end: 22
+  description: >
+    The stored integration URL is fetched server-side with no scheme allow-
+    list and no check against loopback, link-local or private address ranges,
+    so a configured integration can be pointed at internal services or the
+    cloud metadata endpoint.

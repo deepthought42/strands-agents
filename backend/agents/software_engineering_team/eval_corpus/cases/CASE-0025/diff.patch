@@ -1,0 +1,37 @@
+diff --git a/app/security/token_crypto.py b/app/security/token_crypto.py
+new file mode 100644
+--- /dev/null
++++ b/app/security/token_crypto.py
+@@ -0,0 +1,32 @@
++"""Symmetric encryption for stored integration tokens."""
++
++from __future__ import annotations
++
++import os
++
++from cryptography.fernet import Fernet
++
++_FALLBACK_KEY = "cGxhY2Vob2xkZXJfZGV2ZWxvcG1lbnRfa2V5X25vdF9yZWFsPQ=="
++
++
++def _cipher() -> Fernet:
++    """Return the process cipher."""
++    return Fernet(os.getenv("INTEGRATION_ENCRYPTION_KEY", _FALLBACK_KEY).encode())
++
++
++def encrypt(plaintext: str) -> str:
++    """Encrypt one token.
++
++    Preconditions:
++        * ``plaintext`` is a non-empty string.
++    Postconditions:
++        * Returns a Fernet token decryptable by :func:`decrypt`.
++    """
++    assert plaintext, "plaintext is required"
++    return _cipher().encrypt(plaintext.encode()).decode()
++
++
++def decrypt(token: str) -> str:
++    """Decrypt one token."""
++    assert token, "token is required"
++    return _cipher().decrypt(token.encode()).decode()

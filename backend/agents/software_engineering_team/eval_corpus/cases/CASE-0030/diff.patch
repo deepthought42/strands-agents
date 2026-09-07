@@ -1,0 +1,118 @@
+diff --git a/backend/agents/investment_team/api/main.py b/backend/agents/investment_team/api/main.py
+index 8f5e1ca2..c7df757d 100644
+--- a/backend/agents/investment_team/api/main.py
++++ b/backend/agents/investment_team/api/main.py
+@@ -3862,14 +3862,9 @@ def run_paper_trading(request: RunPaperTradingRequest) -> PaperTradingResponse:
+     Because paper trading can take 2-3 minutes (market data fetch + sandbox
+     execution + LLM divergence analysis), this endpoint validates inputs, creates
+     a session in ``OPENING`` status (live path) or ``running`` status (legacy
+-    path), then dispatches a durable ``PaperTradingWorkflow`` via
+-    ``_start_paper_trading`` (Temporal-only). Execution happens inside
+-    ``run_paper_trading_activity`` on the investment task queue, which runs
+-    either ``_run_live_paper_trading_background`` (live path) or
+-    ``_run_paper_trading_background`` (legacy recent-OHLCV path) depending on
+-    whether the live path is enabled. Clients should poll
+-    ``GET /strategy-lab/paper-trade/{session_id}`` for progress until
+-    ``status`` is ``completed`` or ``failed``.
++    path), kicks off a background worker, and returns that session immediately.
++    Clients should poll ``GET /strategy-lab/paper-trade/{session_id}`` for
++    progress until ``status`` is ``completed`` or ``failed``.
+     """
+     # 1 — Look up the winning strategy lab record (synchronous validation)
+     with _lock:
+@@ -4255,12 +4250,9 @@ def _run_live_paper_trading_background(
+ def stop_live_paper_trading(session_id: str) -> PaperTradingResponse:
+     """Idempotent user-stop for a live paper-trading session.
+ 
+-    Delivers a durable stop signal to the running ``PaperTradingWorkflow`` via
+-    ``_signal_paper_trading_stop`` (a Temporal signal); the live loop terminates
+-    when the activity's background heartbeat observes the Temporal cancellation
+-    and trips the session's ``StopController`` (registered in
+-    ``_live_paper_stop_controllers``). Returns the session's current state
+-    (still ``live`` / ``warming_up`` if the worker hasn't yet noticed — clients poll
++    Sets the session's stop flag; the background worker terminates at the next
++    bar boundary. Returns the session's current state (still ``live`` /
++    ``warming_up`` if the worker hasn't yet noticed — clients poll
+     ``GET /strategy-lab/paper-trade/{session_id}`` for the final record).
+     """
+     if not _live_paper_enabled():
+@@ -4433,47 +4425,45 @@ def _recover_orphaned_paper_trading_sessions() -> None:
+     pass, such sessions would sit in an active status forever and clients would
+     poll indefinitely with no terminal transition.
+     """
+-    now_iso = datetime.now(tz=timezone.utc).isoformat()
+-    recovered = 0
+     try:
+-        # Held for the whole enumerate/parse/mutate/write pass so a concurrent
+-        # writer can't have its update clobbered between the read and the
+-        # write-back. Safe only because this handler runs once at startup,
+-        # before request handling begins.
+         with _lock:
+             raw_sessions = list(_paper_trading_sessions.values())
+-            for raw in raw_sessions:
+-                try:
+-                    session = PaperTradingSession.parse_persisted(raw)
+-                except Exception:
+-                    logger.debug(
+-                        "Paper-trade recovery: skipping unparseable session record",
+-                        exc_info=True,
+-                    )
+-                    continue
+-                if session.status not in _ACTIVE_PT_STATES:
+-                    continue
+-                session.status = PaperTradingStatus.FAILED
+-                session.completed_at = now_iso
+-                session.terminated_reason = "process_exit"
+-                session.error = (
+-                    "Paper trading did not complete — the worker process exited before "
+-                    "finalizing the session. Re-run the paper trade from the Strategy Lab."
+-                )
+-                # Preserve the legacy free-form field too so older clients still read a message.
+-                session.divergence_analysis = session.error
+-                try:
+-                    _paper_trading_sessions[session.session_id] = session
+-                    recovered += 1
+-                except Exception:
+-                    logger.exception(
+-                        "Paper-trade recovery: failed to persist failed status for %s",
+-                        session.session_id,
+-                    )
+     except Exception:
+         logger.debug("Paper-trade recovery: could not enumerate sessions", exc_info=True)
+         return
+ 
++    now_iso = datetime.now(tz=timezone.utc).isoformat()
++    recovered = 0
++    for raw in raw_sessions:
++        try:
++            session = PaperTradingSession.parse_persisted(raw)
++        except Exception:
++            logger.debug(
++                "Paper-trade recovery: skipping unparseable session record",
++                exc_info=True,
++            )
++            continue
++        if session.status not in _ACTIVE_PT_STATES:
++            continue
++        session.status = PaperTradingStatus.FAILED
++        session.completed_at = now_iso
++        session.terminated_reason = "process_exit"
++        session.error = (
++            "Paper trading did not complete — the worker process exited before "
++            "finalizing the session. Re-run the paper trade from the Strategy Lab."
++        )
++        # Preserve the legacy free-form field too so older clients still read a message.
++        session.divergence_analysis = session.error
++        try:
++            with _lock:
++                _paper_trading_sessions[session.session_id] = session
++            recovered += 1
++        except Exception:
++            logger.exception(
++                "Paper-trade recovery: failed to persist failed status for %s",
++                session.session_id,
++            )
++
+     if recovered:
+         logger.info(
+             "Paper-trade recovery: marked %d orphaned active session(s) as failed",

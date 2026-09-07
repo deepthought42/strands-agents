@@ -1,0 +1,12 @@
+- label_id: L1
+  gate: qa
+  defect_class: null-deref
+  severity: medium
+  polarity: must_find
+  file_path: backend/agents/software_engineering_team/product_requirements_analysis_agent/question_processing.py
+  line: 259
+  line_end: 259
+  description: >
+    The `.get()` default only covers an absent key. An explicit `null` in the
+    model's response passes through it and `str()` turns it into the literal
+    "None", which then reads as real content.

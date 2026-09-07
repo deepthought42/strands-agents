@@ -1,0 +1,25 @@
+- label_id: L1
+  gate: code_review
+  defect_class: side-effects
+  severity: medium
+  polarity: must_find
+  file_path: backend/agents/investment_team/api/main.py
+  line: 3778
+  line_end: 3780
+  description: >
+    The handler sets `status`, `divergence_analysis` and `completed_at` but
+    never `session.error`, so the one field clients read for a structured
+    failure message stays empty on every crash.
+
+- label_id: L2
+  gate: qa
+  defect_class: inconsistent-state
+  severity: high
+  polarity: must_find
+  file_path: backend/agents/investment_team/api/main.py
+  line: 3778
+  line_end: 3780
+  description: >
+    After this partial failure the session is persisted in a mixed state:
+    marked FAILED, with the crash text in a diagnostic field, but with the
+    error field a consumer checks left unset.

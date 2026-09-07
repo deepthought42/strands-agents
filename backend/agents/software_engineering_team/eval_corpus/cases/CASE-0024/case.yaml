@@ -1,0 +1,9 @@
+case_id: CASE-0024
+title: Repository-relative path joined without containment check
+language: python
+stack: fastapi
+gates: [qa, security]
+mode: diff
+origin:
+  sourcing: real
+  commit: c5a9017

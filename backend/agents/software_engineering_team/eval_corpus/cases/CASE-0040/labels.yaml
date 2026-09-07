@@ -1,0 +1,13 @@
+- label_id: L1
+  gate: qa
+  defect_class: missing-error-handling
+  severity: medium
+  polarity: must_find
+  file_path: backend/agents/investment_team/api/main.py
+  line: 5069
+  line_end: 5071
+  description: >
+    Every exception from the dispatch call is reported to the client as a 503
+    naming one specific cause. A programming error in the same block is
+    surfaced as an infrastructure outage, sending both operators and retry
+    logic the wrong way.

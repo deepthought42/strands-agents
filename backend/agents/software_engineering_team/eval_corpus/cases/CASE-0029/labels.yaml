@@ -1,0 +1,13 @@
+- label_id: L1
+  gate: qa
+  defect_class: race-condition
+  severity: high
+  polarity: must_find
+  file_path: backend/agents/investment_team/api/main.py
+  line: 1418
+  line_end: 1420
+  description: >
+    The cancellation check and the status write are two separate operations. A
+    cancel landing between them is silently overwritten, leaving a cancelled
+    job in a non-cancelled state; the check and the write need to be one
+    conditional update.

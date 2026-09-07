@@ -1,0 +1,13 @@
+- label_id: L1
+  gate: security
+  defect_class: csrf
+  severity: medium
+  polarity: must_find
+  file_path: app/api/routes/account.py
+  line: 14
+  line_end: 18
+  description: >
+    The endpoint mutates account state, is authenticated purely by the session
+    cookie, and accepts a form-encoded body with no origin check and no anti-
+    forgery token, so any third-party page can drive it on a logged-in user's
+    behalf.

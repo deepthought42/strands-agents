@@ -1,0 +1,9 @@
+case_id: CASE-0019
+title: Docstring documents a precondition the function never enforces
+language: python
+stack: temporal-worker
+gates: [code_review]
+mode: diff
+origin:
+  sourcing: real
+  commit: c0db42b

@@ -1,0 +1,20 @@
+diff --git a/backend/agents/software_engineering_team/product_requirements_analysis_agent/question_processing.py b/backend/agents/software_engineering_team/product_requirements_analysis_agent/question_processing.py
+index 9cab6bc6..f767aa10 100644
+--- a/backend/agents/software_engineering_team/product_requirements_analysis_agent/question_processing.py
++++ b/backend/agents/software_engineering_team/product_requirements_analysis_agent/question_processing.py
+@@ -651,13 +651,9 @@ def add_recommendations(
+         return list(open_questions)
+     try:
+         rec_by_id = {
+-            r.get("id"): str(r["recommendation"])
++            r.get("id"): str(r.get("recommendation", ""))
+             for r in recs
+-            if (
+-                isinstance(r, dict)
+-                and isinstance(r.get("id"), str)
+-                and r.get("recommendation") is not None
+-            )
++            if isinstance(r, dict) and "id" in r and isinstance(r.get("id"), str)
+         }
+         result = []
+         for q in open_questions:

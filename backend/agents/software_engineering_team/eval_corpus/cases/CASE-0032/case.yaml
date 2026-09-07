@@ -1,0 +1,9 @@
+case_id: CASE-0032
+title: Flowchart click listeners are added without ever being removed
+language: typescript
+stack: angular
+gates: [qa]
+mode: diff
+origin:
+  sourcing: real
+  commit: caed749

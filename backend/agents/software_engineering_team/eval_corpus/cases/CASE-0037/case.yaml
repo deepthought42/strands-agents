@@ -1,0 +1,9 @@
+case_id: CASE-0037
+title: Externally supplied agent id used directly as a path component
+language: python
+stack: fastapi
+gates: [qa]
+mode: diff
+origin:
+  sourcing: real
+  commit: 3a31cee

@@ -1,6 +1,14 @@
 target-version = "py310"
 line-length = 100
 
+# The review-gate evaluation corpus stores fixtures whose whole purpose is to
+# carry a defect — a missing import, an unclosed literal that does not even
+# parse. Linting or formatting them would either fail the run or silently
+# repair the thing under test. force-exclude honours this for the pre-commit
+# hook too, which passes changed files by explicit path.
+extend-exclude = ["software_engineering_team/eval_corpus"]
+force-exclude = true
+
 [lint]
 select = ["E", "F", "I", "C901", "PLR0915"]
 ignore = ["E501"]

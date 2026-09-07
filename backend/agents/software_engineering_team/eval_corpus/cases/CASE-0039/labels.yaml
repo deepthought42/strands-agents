@@ -1,0 +1,12 @@
+- label_id: L1
+  gate: qa
+  defect_class: missing-error-handling
+  severity: medium
+  polarity: must_find
+  file_path: backend/agents/investment_team/strategy_lab/run_state.py
+  line: 115
+  line_end: 117
+  description: >
+    A catch-all that returns `None` makes a transport failure
+    indistinguishable from a run that genuinely does not exist, so callers
+    treat an outage as an empty result and continue.

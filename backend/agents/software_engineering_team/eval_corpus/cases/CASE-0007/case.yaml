@@ -1,0 +1,9 @@
+case_id: CASE-0007
+title: Null recommendation stringified to the literal "None"
+language: python
+stack: fastapi
+gates: [code_review, qa]
+mode: diff
+origin:
+  sourcing: real
+  commit: 0040820

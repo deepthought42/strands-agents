@@ -1,0 +1,13 @@
+diff --git a/backend/agents/blogging/agent_implementations/pipeline/_common.py b/backend/agents/blogging/agent_implementations/pipeline/_common.py
+index cf8179fa..a98433c9 100644
+--- a/backend/agents/blogging/agent_implementations/pipeline/_common.py
++++ b/backend/agents/blogging/agent_implementations/pipeline/_common.py
+@@ -804,7 +804,7 @@ def _fill_story_placeholders(
+         )
+         job_updater(
+             phase="story_elicitation",
+-            progress=min(35 + idx, 39),
++            progress=35 + idx,
+             status_text=f"Chatting about your experience with: {gap.section_title}",
+         )
+ 

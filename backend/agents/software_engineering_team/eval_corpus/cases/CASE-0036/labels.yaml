@@ -1,0 +1,12 @@
+- label_id: L1
+  gate: qa
+  defect_class: integer-overflow
+  severity: medium
+  polarity: must_find
+  file_path: user-interface/src/app/services/ledger.service.ts
+  line: 28
+  line_end: 29
+  description: >
+    The upstream identifier is a 64-bit integer, but `JSON.parse` and
+    `Number()` land it in a double. Anything past 2^53 is silently rounded, so
+    distinct records collide on the same identifier.

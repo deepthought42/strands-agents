@@ -1,0 +1,13 @@
+- label_id: L1
+  gate: security
+  defect_class: injection
+  severity: high
+  polarity: must_find
+  file_path: backend/agents/agent_registry/dynamic_store.py
+  line: 44
+  line_end: 44
+  description: >
+    `_TABLE` is f-string-interpolated straight into raw SQL at every call site
+    in this module. Placeholders parameterize values, never identifiers, so
+    nothing prevents a future value of this constant from turning all of those
+    statements into an injection vector.

@@ -1,0 +1,14 @@
+case_id: CASE-0015
+title: Team-agnostic platform test imports a domain team package
+language: python
+stack: fastapi
+gates: [code_review]
+mode: diff
+origin:
+  sourcing: invented
+  note: >
+    Modelled on a real, documented boundary in this repository:
+    agent_sandbox_runtime is platform infrastructure that must import only
+    agent_platform/shared.*. The commit that documents the rule (ae3ccf70)
+    fixed the violation inside its own pull request, so the violating state
+    was squashed away and never reached main.

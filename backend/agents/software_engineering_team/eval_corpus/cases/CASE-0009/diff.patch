@@ -1,0 +1,25 @@
+diff --git a/user-interface/src/app/components/coding-team-page/out-of-scope-issues/out-of-scope-issues.component.html b/user-interface/src/app/components/coding-team-page/out-of-scope-issues/out-of-scope-issues.component.html
+index f848f5f3..fb53ff81 100644
+--- a/user-interface/src/app/components/coding-team-page/out-of-scope-issues/out-of-scope-issues.component.html
++++ b/user-interface/src/app/components/coding-team-page/out-of-scope-issues/out-of-scope-issues.component.html
+@@ -15,7 +15,10 @@
+   }
+ 
+   @if (loading) {
+-    <app-loading-spinner [diameter]="24" message="Loading out-of-scope issues…" />
++    <div class="oos-issues__loading">
++      <mat-spinner diameter="24"></mat-spinner>
++      <span>Loading out-of-scope issues...</span>
++    </div>
+   } @else if (proposals.length === 0) {
+     <div class="oos-issues__empty">
+       <mat-icon>check_circle_outline</mat-icon>
+@@ -69,7 +72,7 @@
+           <mat-checkbox
+             [checked]="isSelected(p)"
+             (change)="toggleSelection(p)"
+-            [aria-label]="'Select: ' + p.description"
++            [attr.aria-label]="'Select: ' + p.description"
+             class="oos-issue__checkbox"
+           ></mat-checkbox>
+ 

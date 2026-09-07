@@ -1,0 +1,12 @@
+case_id: CASE-0036
+title: Identifier from an external API truncated by JS number precision
+language: typescript
+stack: angular
+gates: [qa]
+mode: diff
+origin:
+  sourcing: invented
+  note: >
+    Python's arbitrary-precision integers make classic overflow rare on the
+    backend and no real fix commit was found; the realistic instance in this
+    stack is numeric precision loss at an external boundary.

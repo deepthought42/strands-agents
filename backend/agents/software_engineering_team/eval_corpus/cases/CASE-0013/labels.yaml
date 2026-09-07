@@ -1,0 +1,13 @@
+- label_id: L1
+  gate: code_review
+  defect_class: integration
+  severity: critical
+  polarity: must_find
+  file_path: strands_research_agent/strands_integration.py
+  line: 17
+  line_end: 19
+  description: >
+    `create_research_agent` takes an `llm_client` argument and then
+    immediately reassigns it to a hard-coded local Ollama client, so the
+    caller's injected client is discarded and every host integration silently
+    talks to localhost instead.

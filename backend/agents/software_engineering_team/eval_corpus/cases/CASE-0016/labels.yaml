@@ -1,0 +1,12 @@
+- label_id: L1
+  gate: code_review
+  defect_class: refactor
+  severity: medium
+  polarity: must_find
+  file_path: backend/agents/software_engineering_team/backend_code_v2_team/orchestrator.py
+  line: 290
+  line_end: 314
+  description: >
+    This review-gated execution block, including its two failure branches, is
+    duplicated verbatim in the sibling frontend orchestrator. Both derive from
+    the same base class, which is where the shared body belongs.

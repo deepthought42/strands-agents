@@ -1,0 +1,13 @@
+- label_id: L1
+  gate: qa
+  defect_class: unvalidated-input
+  severity: high
+  polarity: must_find
+  file_path: backend/agents/agent_provisioning_team/shared/environment_store.py
+  line: 365
+  line_end: 368
+  description: >
+    Every sibling method validates `agent_id` as a safe path component before
+    using it. This one reads the value back out of stored JSON records and
+    uses it unchecked, so a record written before the check existed still
+    escapes.

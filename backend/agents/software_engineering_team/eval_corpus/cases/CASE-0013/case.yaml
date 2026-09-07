@@ -1,0 +1,9 @@
+case_id: CASE-0013
+title: Factory overwrites its own injected llm_client
+language: python
+stack: strands
+gates: [code_review]
+mode: diff
+origin:
+  sourcing: real
+  commit: e325ad8

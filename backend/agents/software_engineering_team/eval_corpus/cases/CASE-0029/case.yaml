@@ -1,0 +1,9 @@
+case_id: CASE-0029
+title: Cancellation check and status write are not atomic
+language: python
+stack: fastapi
+gates: [qa]
+mode: diff
+origin:
+  sourcing: real
+  commit: cb8aded

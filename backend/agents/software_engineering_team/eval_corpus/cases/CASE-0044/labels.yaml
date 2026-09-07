@@ -1,0 +1,11 @@
+- label_id: L1
+  gate: qa
+  defect_class: syntax-error
+  severity: critical
+  polarity: must_find
+  file_path: app/config/defaults.py
+  line: 11
+  line_end: 11
+  description: >
+    The `RETRY_POLICY` dictionary literal is never closed, so the module fails
+    to parse and every importer fails with it.

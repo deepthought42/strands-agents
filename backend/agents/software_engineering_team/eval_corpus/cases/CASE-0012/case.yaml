@@ -1,0 +1,9 @@
+case_id: CASE-0012
+title: Native blocking alert() used for an error toast
+language: typescript
+stack: angular
+gates: [code_review]
+mode: diff
+origin:
+  sourcing: real
+  commit: 086a4894

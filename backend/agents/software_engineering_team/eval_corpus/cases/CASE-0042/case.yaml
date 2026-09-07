@@ -1,0 +1,11 @@
+case_id: CASE-0042
+title: Template path points at a directory that does not exist
+language: python
+stack: fastapi
+gates: [qa]
+mode: files
+origin:
+  sourcing: invented
+  note: >
+    Same structural reason as the other build-failure classes: pre-merge
+    gating plus squash merges keep broken-build states out of main's history.

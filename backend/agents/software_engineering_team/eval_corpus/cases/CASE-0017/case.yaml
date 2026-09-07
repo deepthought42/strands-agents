@@ -1,0 +1,9 @@
+case_id: CASE-0017
+title: Redundant `or` fallback masks a valid falsy value
+language: python
+stack: fastapi
+gates: [code_review]
+mode: diff
+origin:
+  sourcing: real
+  commit: 66bc52d5

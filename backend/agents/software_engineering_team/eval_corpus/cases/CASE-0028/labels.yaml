@@ -1,0 +1,12 @@
+- label_id: L1
+  gate: qa
+  defect_class: off-by-one
+  severity: medium
+  polarity: must_find
+  file_path: backend/agents/blogging/agent_implementations/pipeline/_common.py
+  line: 807
+  line_end: 807
+  description: >
+    `35 + idx` is unbounded in the loop index, so with enough gaps the
+    reported progress reaches and passes the next phase's fixed value of 40
+    and the bar moves backwards when that phase starts.

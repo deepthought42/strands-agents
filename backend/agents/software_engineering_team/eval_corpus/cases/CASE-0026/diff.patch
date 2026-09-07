@@ -1,0 +1,32 @@
+diff --git a/app/cache/session_cache.py b/app/cache/session_cache.py
+new file mode 100644
+--- /dev/null
++++ b/app/cache/session_cache.py
+@@ -0,0 +1,27 @@
++"""Shared session cache backed by the platform key-value store."""
++
++from __future__ import annotations
++
++import pickle
++from typing import Any, Optional
++
++from ..store import kv
++
++
++def load_session(session_id: str) -> Optional[dict[str, Any]]:
++    """Read one cached session.
++
++    Preconditions:
++        * ``session_id`` is a non-empty identifier.
++    Postconditions:
++        * Returns the cached mapping, or None when the key is absent.
++    """
++    assert session_id, "session_id is required"
++    raw = kv.get(f"session:{session_id}")
++    return pickle.loads(raw) if raw is not None else None
++
++
++def store_session(session_id: str, payload: dict[str, Any]) -> None:
++    """Write one cached session."""
++    assert session_id, "session_id is required"
++    kv.set(f"session:{session_id}", pickle.dumps(payload))

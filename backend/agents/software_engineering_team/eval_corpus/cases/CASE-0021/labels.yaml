@@ -1,0 +1,14 @@
+- label_id: L1
+  gate: security
+  defect_class: xss
+  severity: critical
+  polarity: must_find
+  file_path: user-interface/src/app/components/process-designer-chat/process-designer-chat.component.ts
+  line: 780
+  line_end: 780
+  description: >
+    Every other dynamic value in this SVG builder is wrapped in `escSvg()`;
+    the trigger description is not. The result is rendered through
+    `bypassSecurityTrustHtml()`, and the text originates from model output
+    seeded by untrusted chat input, so this is a stored cross-site scripting
+    gap.

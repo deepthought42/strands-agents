@@ -1,0 +1,11 @@
+case_id: CASE-0005
+title: Helper module name shadows the stdlib logging module
+language: python
+stack: fastapi
+gates: [code_review]
+mode: diff
+origin:
+  sourcing: invented
+  note: >
+    Naming nits are fixed pre-merge inside the same squash-merged pull request
+    that introduced them, so no isolated rename survives in main's history.

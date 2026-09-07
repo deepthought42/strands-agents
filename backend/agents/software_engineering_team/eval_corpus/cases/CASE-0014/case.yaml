@@ -1,0 +1,9 @@
+case_id: CASE-0014
+title: Teardown success spec passes without exercising the subscribe path
+language: typescript
+stack: angular
+gates: [code_review]
+mode: diff
+origin:
+  sourcing: real
+  commit: 0175839

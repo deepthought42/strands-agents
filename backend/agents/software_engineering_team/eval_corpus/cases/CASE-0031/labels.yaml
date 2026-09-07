@@ -1,0 +1,12 @@
+- label_id: L1
+  gate: qa
+  defect_class: race-condition
+  severity: medium
+  polarity: must_find
+  file_path: backend/agents/investment_team/api/main.py
+  line: 348
+  line_end: 353
+  description: >
+    `pop` reads the value and then deletes the key as two separate calls. Two
+    callers racing here both observe the value and both believe they removed
+    it, so the same record is handed out twice.

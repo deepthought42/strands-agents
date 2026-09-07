@@ -1,0 +1,12 @@
+case_id: CASE-0006
+title: Response model defined inline in agent.py instead of models.py
+language: python
+stack: fastapi
+gates: [code_review]
+mode: diff
+origin:
+  sourcing: invented
+  note: >
+    No standalone real fix for file/module misplacement exists in main's
+    history; modelled on this repository's documented three-file leaf-agent
+    convention (agent.py / models.py / prompts.py).

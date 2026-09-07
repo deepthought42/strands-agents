@@ -1,0 +1,9 @@
+case_id: CASE-0034
+title: OHLC values coerced with float() without a null guard
+language: python
+stack: fastapi
+gates: [qa]
+mode: diff
+origin:
+  sourcing: real
+  commit: c0e71da

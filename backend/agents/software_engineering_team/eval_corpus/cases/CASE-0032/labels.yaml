@@ -1,0 +1,12 @@
+- label_id: L1
+  gate: qa
+  defect_class: resource-leak
+  severity: medium
+  polarity: must_find
+  file_path: user-interface/src/app/components/process-designer-chat/process-designer-chat.component.ts
+  line: 191
+  line_end: 191
+  description: >
+    A click listener is attached to every flowchart node each time the chart
+    is redrawn, and no reference is retained to remove them. Each redraw
+    leaves the previous generation of listeners attached to detached nodes.

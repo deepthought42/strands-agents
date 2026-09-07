@@ -1,0 +1,147 @@
+diff --git a/backend/agents/investment_team/market_data_service.py b/backend/agents/investment_team/market_data_service.py
+index aa90becb..ab4f9081 100644
+--- a/backend/agents/investment_team/market_data_service.py
++++ b/backend/agents/investment_team/market_data_service.py
+@@ -11,7 +11,6 @@ from __future__ import annotations
+ import logging
+ import math
+ import os
+-import sys
+ import time
+ from datetime import date, datetime, timedelta, timezone
+ from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Sequence, Tuple
+@@ -589,14 +588,7 @@ class MarketDataService:
+                 return []
+ 
+             if df is not None and not df.empty:
+-                try:
+-                    return self._df_to_bars(df)
+-                except Exception as exc:
+-                    # Defense in depth: a malformed frame must never abort the
+-                    # whole fetch. Degrade to an empty result (the caller falls
+-                    # back to the next provider) rather than propagating.
+-                    logger.warning("failed to convert yfinance frame for %s: %s", yf_symbol, exc)
+-                    return []
++                return self._df_to_bars(df)
+ 
+             if attempt < max_retries - 1:
+                 wait = 2 ** (attempt + 1)
+@@ -861,67 +853,15 @@ class MarketDataService:
+     # warning.
+     _FILL_LOG_MAX_DATES = 10
+ 
+-    @staticmethod
+-    def _is_missing_sentinel(value: object) -> bool:
+-        """True iff ``value`` is an explicit missing-value sentinel.
+-
+-        Recognises ``None`` and pandas ``NA``. pandas is detected via
+-        ``sys.modules`` rather than imported: ``pd.NA`` is a singleton that can
+-        only exist once pandas is loaded, so if pandas is not in ``sys.modules``
+-        the value cannot be ``pd.NA`` — and this module keeps its hard import
+-        surface pandas-free.
+-
+-        Postconditions:
+-            Returns ``True`` only for ``None`` / pandas ``NA``; ``False`` for
+-            every other value (including numbers, strings, and malformed
+-            non-scalar cells such as dicts/lists).
+-        """
+-        if value is None:
+-            return True
+-        pd = sys.modules.get("pandas")
+-        return pd is not None and value is pd.NA
+-
+-    @staticmethod
+-    def _coerce_finite_or_nan(value: float | str | int | None) -> float:
+-        """Coerce a raw provider value to float, mapping missing sentinels to NaN.
+-
+-        Preconditions:
+-            ``value`` is a number, a numeric string, or a missing-value sentinel
+-            (``None`` or a pandas ``NA``). A non-numeric string or a malformed
+-            non-scalar cell is still a caller bug.
+-
+-        Postconditions:
+-            Returns ``float(value)`` for numeric input. Returns ``float("nan")``
+-            for a missing-value sentinel (``None`` / pandas ``NA``) so the
+-            caller's finite check treats the row as a gap — identical handling to
+-            an upstream ``numpy.nan``. A non-numeric string (``ValueError``) and a
+-            malformed non-scalar cell — e.g. a dict/list/object from a bad JSON
+-            schema or an object-dtype column (``TypeError``) — both propagate, so
+-            the provider fails and the chain falls back rather than silently
+-            imputing a fabricated price.
+-        """
+-        try:
+-            return float(value)  # type: ignore[arg-type]
+-        except TypeError:
+-            # float() raises TypeError for BOTH missing-value sentinels
+-            # (None / pd.NA) and malformed non-scalar cells (dict/list/object).
+-            # Only the explicit sentinels are a non-finite gap the forward-fill/
+-            # drop path should absorb like an upstream numpy.nan; a malformed
+-            # value is a genuine data defect and must propagate so this provider
+-            # fails and the chain falls back rather than imputing a fake price.
+-            if MarketDataService._is_missing_sentinel(value):
+-                return float("nan")
+-            raise
+-
+     @staticmethod
+     def _normalize_ohlc_bar(
+         *,
+         date: str,
+-        open: float | str | int | None,
+-        high: float | str | int | None,
+-        low: float | str | int | None,
+-        close: float | str | int | None,
+-        volume: float | str | int | None,
++        open: float | str | int,
++        high: float | str | int,
++        low: float | str | int,
++        close: float | str | int,
++        volume: float | str | int,
+     ) -> Tuple[Optional[OHLCVBar], bool]:
+         """Round, finite-check, and H/L-envelope-repair a single OHLC row.
+ 
+@@ -933,15 +873,12 @@ class MarketDataService:
+ 
+         Preconditions:
+             ``open``/``high``/``low``/``close``/``volume`` are raw provider
+-            values — numeric, numeric strings (such as the JSON values Twelve
+-            Data and Alpha Vantage return), or a missing-value sentinel (``None``
+-            / pandas ``NA``). This helper owns the coercion and rounding to 4 dp;
+-            callers pass the extracted values through verbatim. A missing-value
+-            sentinel is treated as a non-finite value (the row is forward-filled
+-            or dropped, like an upstream ``numpy.nan``); a genuinely non-numeric
+-            string (``ValueError``) or a malformed non-scalar cell such as a
+-            dict/list/object (``TypeError``) is a caller (precondition) bug and
+-            propagates rather than being silently coerced.
++            values coercible by ``float(...)`` — numeric, or numeric strings
++            such as the JSON values Twelve Data and Alpha Vantage return. This
++            helper owns the coercion and rounding to 4 dp; callers pass the
++            extracted values through verbatim. A value that is ``None`` or a
++            non-numeric string is a caller (precondition) bug and surfaces as a
++            ``TypeError``/``ValueError`` rather than being silently coerced.
+ 
+         Postconditions:
+             Returns ``(None, False)`` when any of O/H/L/C is non-finite (the
+@@ -953,10 +890,10 @@ class MarketDataService:
+             zero-volume sentinel ADV/liquidity math already excludes), logged
+             at WARNING.
+         """
+-        o = round(MarketDataService._coerce_finite_or_nan(open), 4)
+-        h = round(MarketDataService._coerce_finite_or_nan(high), 4)
+-        ll = round(MarketDataService._coerce_finite_or_nan(low), 4)
+-        c = round(MarketDataService._coerce_finite_or_nan(close), 4)
++        o = round(float(open), 4)
++        h = round(float(high), 4)
++        ll = round(float(low), 4)
++        c = round(float(close), 4)
+         if not (math.isfinite(o) and math.isfinite(h) and math.isfinite(ll) and math.isfinite(c)):
+             return (None, False)
+         # Volume can be non-finite (NaN on early-listing/low-liquidity sessions)
+@@ -964,7 +901,7 @@ class MarketDataService:
+         # index OHLC positionally — and neutralise only the volume to 0.0, which
+         # ADV/liquidity math already excludes via its ``volume > 0`` filter.
+         # Dropping the whole row would discard valid price data.
+-        v = MarketDataService._coerce_finite_or_nan(volume)
++        v = float(volume)
+         if not math.isfinite(v):
+             logger.warning("non-finite volume %r on %s bar; coercing to 0.0", volume, date)
+             v = 0.0

@@ -1,0 +1,13 @@
+case_id: CASE-0022
+title: State-changing endpoint accepts a cookie-authenticated cross-origin form post
+language: python
+stack: fastapi
+gates: [security]
+mode: diff
+origin:
+  sourcing: invented
+  note: >
+    No CSRF defect and no CSRF defense code exists in history: this
+    application authenticates with bearer tokens, API keys and webhook
+    signatures rather than cookie sessions, so classic CSRF has structurally
+    limited applicability here.

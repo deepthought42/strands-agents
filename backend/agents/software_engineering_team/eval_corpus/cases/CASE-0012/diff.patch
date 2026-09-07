@@ -1,0 +1,34 @@
+diff --git a/user-interface/src/app/components/agent-team-studio/agent-console/agent-runner/agent-runner.component.ts b/user-interface/src/app/components/agent-team-studio/agent-console/agent-runner/agent-runner.component.ts
+index 85141fa9..48223bd3 100644
+--- a/user-interface/src/app/components/agent-team-studio/agent-console/agent-runner/agent-runner.component.ts
++++ b/user-interface/src/app/components/agent-team-studio/agent-console/agent-runner/agent-runner.component.ts
+@@ -44,7 +44,6 @@ import type {
+ import { AgentRunHistoryComponent } from '../agent-run-history/agent-run-history.component';
+ import { AgentSchemaFormComponent } from '../agent-schema-form/agent-schema-form.component';
+ import { InlineBannerComponent } from '../../../../shared/inline-banner/inline-banner.component';
+-import { extractErrorDetail } from '../../../../shared/extract-error-detail';
+ import {
+   AgentDiffDialogComponent,
+   type AgentDiffDialogData,
+@@ -344,9 +343,9 @@ export class AgentRunnerComponent implements OnInit, OnDestroy {
+             this.savedInputs.update((rows) => [saved, ...rows]);
+             this.selectedPickerValue.set(`saved:${saved.id}`);
+           },
+-          error: () => {
+-            // Global error interceptor handles the snackbar notification.
+-
++          error: (err) => {
++            // Mat dialog is already closed; surface via snackbar-equivalent.
++            alert(err?.error?.detail ?? err?.message ?? 'Failed to save input');
+           },
+         });
+     });
+@@ -488,7 +487,7 @@ export class AgentRunnerComponent implements OnInit, OnDestroy {
+           // as `detail`, so we can surface the output + logs inline.
+           this.lastResponse.set(err.error.detail as InvokeEnvelope);
+         } else {
+-          this.lastError.set(extractErrorDetail(err, 'Invocation failed.'));
++          this.lastError.set(err.error?.detail ?? err.message ?? 'Invocation failed.');
+         }
+         this.historyPanel?.refresh();
+       },

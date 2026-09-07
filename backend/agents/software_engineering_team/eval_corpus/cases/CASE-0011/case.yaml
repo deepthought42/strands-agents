@@ -1,0 +1,9 @@
+case_id: CASE-0011
+title: Cache root read from an environment variable that is never set
+language: python
+stack: fastapi
+gates: [code_review]
+mode: diff
+origin:
+  sourcing: real
+  commit: c6169cd

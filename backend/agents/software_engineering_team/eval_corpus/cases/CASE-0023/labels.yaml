@@ -1,0 +1,13 @@
+- label_id: L1
+  gate: security
+  defect_class: auth
+  severity: critical
+  polarity: must_find
+  file_path: backend/unified_api/routes/integrations.py
+  line: 613
+  line_end: 616
+  description: >
+    Signature verification runs only when a signing secret happens to be
+    configured. With the secret unset the request is accepted unverified, so a
+    missing configuration value silently turns an authenticated webhook into
+    an open endpoint. It must fail closed.

@@ -1,0 +1,25 @@
+- label_id: L1
+  gate: code_review
+  defect_class: logic
+  severity: high
+  polarity: must_find
+  file_path: backend/agents/software_engineering_team/product_requirements_analysis_agent/question_processing.py
+  line: 654
+  line_end: 654
+  description: >
+    `str(r.get("recommendation", ""))` coerces an explicit JSON `null` to the
+    three-character string "None", which downstream code then treats as a
+    present, non-empty recommendation.
+
+- label_id: L2
+  gate: qa
+  defect_class: null-deref
+  severity: high
+  polarity: must_find
+  file_path: backend/agents/software_engineering_team/product_requirements_analysis_agent/question_processing.py
+  line: 654
+  line_end: 654
+  description: >
+    A `null` recommendation from the model is not guarded before
+    stringification, so the absent value silently becomes populated data
+    instead of staying empty.

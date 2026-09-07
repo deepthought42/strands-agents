@@ -1,0 +1,13 @@
+- label_id: L1
+  gate: security
+  defect_class: crypto
+  severity: high
+  polarity: must_find
+  file_path: app/security/token_crypto.py
+  line: 9
+  line_end: 14
+  description: >
+    When the key environment variable is unset the module falls back to a
+    constant embedded in the source, so every deployment that forgets to
+    configure a key shares one publicly readable key and the ciphertext is
+    decryptable by anyone with the repository.

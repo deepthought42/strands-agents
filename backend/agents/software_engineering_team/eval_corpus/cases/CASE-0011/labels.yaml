@@ -1,0 +1,13 @@
+- label_id: L1
+  gate: code_review
+  defect_class: standards
+  severity: high
+  polarity: must_find
+  file_path: backend/agents/sales_team/outcome_store.py
+  line: 30
+  line_end: 32
+  description: >
+    The module resolves its cache root from `AGENT_CACHE_DIR`, which nothing
+    in the deployment config sets. Every other store uses the platform-wide
+    `AGENT_CACHE` convention backed by the shared data volume, so these paths
+    land outside the persistent volume and are lost on restart.

@@ -1,0 +1,9 @@
+case_id: CASE-0039
+title: Bare except returns None, erasing the difference from not-found
+language: python
+stack: fastapi
+gates: [qa]
+mode: diff
+origin:
+  sourcing: real
+  commit: 4f1b84e

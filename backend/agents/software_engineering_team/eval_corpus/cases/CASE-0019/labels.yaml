@@ -1,0 +1,12 @@
+- label_id: L1
+  gate: code_review
+  defect_class: documentation
+  severity: medium
+  polarity: must_find
+  file_path: backend/agents/job_matching_team/temporal/workflows.py
+  line: 286
+  line_end: 286
+  description: >
+    The docstring states `top_n >= 1` as a precondition, but nothing validates
+    it. A caller passing zero or a negative value silently gets a wrong or
+    empty top list from the slice instead of a clear failure.

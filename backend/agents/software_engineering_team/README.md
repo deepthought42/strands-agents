@@ -169,7 +169,11 @@ labels — and how that plays out against the matching rule, with worked
 The selection plan that fixes the corpus's defect-class distribution,
 per-class case counts, and backend/frontend proportion the case-authoring
 stories fill — justified against that inventory and format — is specified
-in [`docs/CORPUS_SELECTION_PLAN.md`](docs/CORPUS_SELECTION_PLAN.md).
+in [`docs/CORPUS_SELECTION_PLAN.md`](docs/CORPUS_SELECTION_PLAN.md). The cases
+themselves — one directory per case, each a fixture plus its labels — live in
+[`eval_corpus/`](eval_corpus/README.md), whose README carries the case index,
+the achieved per-class counts against that plan, and the corpus's known
+limits.
 
 ## Plan folder
 

@@ -1,0 +1,9 @@
+case_id: CASE-0020
+title: SQL table identifier interpolated with no identifier validation
+language: python
+stack: fastapi
+gates: [security]
+mode: diff
+origin:
+  sourcing: real
+  commit: 27691e3

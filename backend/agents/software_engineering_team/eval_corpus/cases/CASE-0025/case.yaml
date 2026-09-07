@@ -1,0 +1,12 @@
+case_id: CASE-0025
+title: Encryption key falls back to a hard-coded literal
+language: python
+stack: fastapi
+gates: [security]
+mode: diff
+origin:
+  sourcing: invented
+  note: >
+    The real Fernet-based encryption path in this repository is used correctly
+    today; no weak-cipher or hard-coded-key defect was found in history.
+    Modelled on that real code path.

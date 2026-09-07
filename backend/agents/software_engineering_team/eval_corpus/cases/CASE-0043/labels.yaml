@@ -1,0 +1,11 @@
+- label_id: L1
+  gate: qa
+  defect_class: type-error
+  severity: high
+  polarity: must_find
+  file_path: user-interface/src/app/services/run-events.service.ts
+  line: 21
+  line_end: 21
+  description: >
+    `event.error` is read on the union without narrowing by `event.type`. Only
+    the failure member declares that property, so this does not compile.

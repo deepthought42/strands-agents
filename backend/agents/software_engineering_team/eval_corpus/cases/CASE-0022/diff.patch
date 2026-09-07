@@ -1,0 +1,32 @@
+diff --git a/app/api/routes/account.py b/app/api/routes/account.py
+new file mode 100644
+--- /dev/null
++++ b/app/api/routes/account.py
+@@ -0,0 +1,27 @@
++"""Account self-service endpoints."""
++
++from __future__ import annotations
++
++from fastapi import APIRouter, Depends, Form
++
++from ..auth import current_user_from_session
++from ..models.users import User
++from ..services import account_service
++
++router = APIRouter(prefix="/account", tags=["account"])
++
++
++@router.post("/email")
++def change_email(
++    new_email: str = Form(...),
++    user: User = Depends(current_user_from_session),
++) -> dict[str, str]:
++    """Change the signed-in user's email address.
++
++    Preconditions:
++        * ``new_email`` parses as an email address.
++    Postconditions:
++        * The stored address is updated and the new address is returned.
++    """
++    account_service.set_email(user.id, new_email)
++    return {"email": new_email}
